@@ -1,6 +1,6 @@
 {
   "name": "maple-potential-calculator",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "build": "esbuild entry.jsx --bundle --minify --loader:.jsx=jsx --jsx=automatic --define:process.env.NODE_ENV=\"\\\"production\\\"\" --outfile=bundle.js && node make_html.mjs"
