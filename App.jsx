@@ -89,7 +89,7 @@ function buildTierAtoms(part, tier, level) {
 
 // ---------- 롤 분포 열거 엔진 ----------
 // grade의 3줄 조합을 중복 제한(최대1/최대2) 규칙까지 반영해 정확 열거
-function enumerateRolls(part, level, grade, evalCombo) {
+function enumerateRolls(part, level, grade, evalCombo, fixedAtom = null) {
   const lowTier = grade === "legend" ? "unique" : "epic";
   const hiPool = buildTierAtoms(part, grade, level);
   const loPool = buildTierAtoms(part, lowTier, level);
@@ -115,9 +115,9 @@ function enumerateRolls(part, level, grade, evalCombo) {
     (a.kind === "invulP" && st.invulP >= 2) || (a.kind === "dmgIg" && st.dmgIg >= 2);
 
   const st0 = { useful: false, invulT: false, invulP: 0, dmgIg: 0 };
-  // 1줄: 표기 등급 100%
-  for (const a1 of hiPool.atoms) {
-    const p1 = a1.weight / hiPool.total;
+  // 1줄: 표기 등급 100% (프라임 큐브: 고정 옵션 1개로 대체, p1 = 1)
+  for (const a1 of fixedAtom ? [fixedAtom] : hiPool.atoms) {
+    const p1 = fixedAtom ? 1 : a1.weight / hiPool.total;
     if (p1 <= 0) continue;
     const st1 = nextState(st0, a1);
     // 2줄: 이탈 20% / 하위 80%
@@ -193,15 +193,28 @@ function familize(targets) {
   return { fams, rest };
 }
 // 3줄 조합 → 표시용 라벨 (동일 구성 합산, 기타=미추적 옵션)
+const atomLabel = (a) =>
+  a.kind === "stat" ? `${a.key}+${a.value}%`
+  : a.kind === "all" ? `올스탯+${a.value}%`
+  : a.kind === "hp" ? `HP+${a.value}%`
+  : a.kind === "cd" ? `쿨감-${a.value}초`
+  : a.kind === "crit" ? "크뎀+8%"
+  : a.kind === "drop" ? "드랍" : a.kind === "meso" ? "메획" : "기타";
 function comboLabel(a1, a2, a3) {
-  const lab = (a) =>
-    a.kind === "stat" ? `${a.key}+${a.value}%`
-    : a.kind === "all" ? `올스탯+${a.value}%`
-    : a.kind === "hp" ? `HP+${a.value}%`
-    : a.kind === "cd" ? `쿨감-${a.value}초`
-    : a.kind === "crit" ? "크뎀+8%"
-    : a.kind === "drop" ? "드랍" : a.kind === "meso" ? "메획" : "기타";
-  return [a1, a2, a3].map(lab).sort((x, y) => (x === "기타") - (y === "기타") || x.localeCompare(y)).join(" · ");
+  return [a1, a2, a3].map(atomLabel).sort((x, y) => (x === "기타") - (y === "기타") || x.localeCompare(y)).join(" · ");
+}
+// 3줄 합산값 → 충족 타겟 목록과 최고가 타겟 (스탯 계열은 구간 판정)
+function bestHit(fams, rest, sums) {
+  let best = null; const hits = [];
+  for (const fk in fams) {
+    const v = fk === "hp" ? sums.hp : fk === "all" ? sums.allSum : sums.s[fk.slice(2)];
+    let hit = null;
+    for (const t of fams[fk]) { if (v >= t.min) hit = t; else break; }
+    if (hit) hits.push(hit);
+  }
+  for (const t of rest) if (targetSatisfied(t, sums)) hits.push(t);
+  for (const t of hits) if (!best || t.price > best.price) best = t;
+  return { best, hits };
 }
 
 // 활성 타겟 집합에 대한 등급별 롤 통계
@@ -213,17 +226,9 @@ function gradeStats(part, level, grade, targets, allstatCount, feeMul, combosOut
   const share = {}, satisf = {}; const cdf = [];
   enumerateRolls(part, level, grade, (p, a1, a2, a3) => {
     const sums = comboSums(a1, a2, a3, allstatCount);
-    let best = null; const hits = [];
-    for (const fk in fams) {
-      const v = fk === "hp" ? sums.hp : fk === "all" ? sums.allSum : sums.s[fk.slice(2)];
-      let hit = null;
-      for (const t of fams[fk]) { if (v >= t.min) hit = t; else break; }
-      if (hit) hits.push(hit);
-    }
-    for (const t of rest) if (targetSatisfied(t, sums)) hits.push(t);
+    const { best, hits } = bestHit(fams, rest, sums);
     for (const t of hits) {
       satisf[t.id] = (satisf[t.id] || 0) + p;
-      if (!best || t.price > best.price) best = t;
       if (combosOut) {
         const m = combosOut[t.id] || (combosOut[t.id] = {});
         const key = comboLabel(a1, a2, a3);
@@ -242,6 +247,39 @@ function gradeStats(part, level, grade, targets, allstatCount, feeMul, combosOut
   let acc = 0;
   const cum = cdf.map((e) => ({ c: (acc += e.p), rev: e.rev, tid: e.tid }));
   return { q, rev: q > 0 ? revSum / q : 0, share, satisf, cum };
+}
+
+// ---------- 프라임 큐브 (1줄 고정 · 2·3줄만 재설정 · 기존/신규 중 선택 적용) ----------
+// 1줄로 고정 가능한 옵션 후보 (레전드리 풀의 추적 옵션)
+function primeAtomList(part, level) {
+  return buildTierAtoms(part, "legend", level).atoms.filter((a) => ["stat", "all", "hp", "cd", "crit", "drop", "meso"].includes(a.kind));
+}
+// 프라임 단계 최적 정지. '선택 적용' 덕에 보유 옵션은 단조 증가 → 상태 = 현재 보유 최고가 타겟 구간 k (0 = 타겟 없음 → 깡통가)
+//  V_k = max( v_k,  (−(C_p+g) + Σ_{m>k} P(m)·V_m) / (1 − P(new ≤ k)) )   — 새 롤 분포는 상태와 무관(1줄 고정)
+//  N_k, R_k: 계속 시 기대 프라임 횟수 / 기대 판매 수익
+function solvePrime(part, level, fixedAtom, cands, allstatCount, feeMul, floorPrice, Cp, g, autoExclude) {
+  const { fams, rest } = familize(cands);
+  const pById = {}; let pNone = 0;
+  enumerateRolls(part, level, "legend", (p, a1, a2, a3) => {
+    const { best } = bestHit(fams, rest, comboSums(a1, a2, a3, allstatCount));
+    if (best) pById[best.id] = (pById[best.id] || 0) + p; else pNone += p;
+  }, fixedAtom);
+  const states = [{ id: "__floor", price: floorPrice, p: pNone, t: null },
+    ...cands.map((t) => ({ id: t.id, price: t.price, p: pById[t.id] || 0, t })).sort((a, b) => a.price - b.price)];
+  const K = states.length;
+  const V = new Array(K), N = new Array(K), R = new Array(K), sell = new Array(K);
+  let above = 0, sPV = 0, sPN = 0, sPR = 0; // m > k 합
+  for (let k = K - 1; k >= 0; k--) {
+    const v = states[k].price * feeMul;
+    let cont = -Infinity, n = 0, r = 0;
+    if (above > 1e-12) { cont = (-(Cp + g) + sPV) / above; n = (1 + sPN) / above; r = sPR / above; }
+    const doSell = autoExclude ? v >= cont : (k > 0 || above <= 1e-12); // 수동 모드: 타겟이면 즉시 판매, 깡통이면 계속
+    sell[k] = doSell; V[k] = doSell ? v : cont; N[k] = doSell ? 0 : n; R[k] = doSell ? v : r;
+    above += states[k].p; sPV += states[k].p * V[k]; sPN += states[k].p * N[k]; sPR += states[k].p * R[k];
+  }
+  const idx = {}; states.forEach((st, i) => (idx[st.id] = i));
+  const cum = []; let c = 0; states.forEach((st, i) => { c += st.p; cum.push({ c, k: i }); });
+  return { states, idx, V, N, R, sell, cum, probById: pById, pNone };
 }
 
 // ---------- 라운드 해석 엔진 (천장 이월 마르코프) ----------
@@ -313,13 +351,70 @@ function buildEngine(cfg, gShift = 0) {
   //  A) 활성 타겟 없음      → 승급 롤에서 깡통가로 즉시 처분
   //  B) 타겟 있음, 깡통 미채택 → 타겟 뜰 때까지 재설정: 추가 롤 (1-q)/q
   //  C) 타겟 있음, 깡통 채택  → 매 롤이 판매 조건: 승급 롤에서 즉시 판매 (타겟 or 깡통가)
-  const legMode = activeL.length === 0 ? "A" : floorAccepted ? "C" : "B";
-  const legHitFloor = legMode !== "B"; // 깡통가가 수익에 관여하는지
-  const legRolls = legMode === "B" ? (1 - lSt.q) / Math.max(lSt.q, 1e-12) : 0;
-  const legRev =
+  let legMode = activeL.length === 0 ? "A" : floorAccepted ? "C" : "B";
+  let legHitFloor = legMode !== "B"; // 깡통가가 수익에 관여하는지
+  let legRolls = legMode === "B" ? (1 - lSt.q) / Math.max(lSt.q, 1e-12) : 0;
+  let legRev =
     legMode === "A" ? floorPrice * feeMul
     : legMode === "C" ? lSt.q * lSt.rev + (1 - lSt.q) * floorPrice * feeMul
     : lSt.rev;
+  let legPrimeRolls = 0;
+
+  // ---- 프라임 큐브 모드 (legMode "P") ----
+  //  L1) 일반 재설정: 매 롤 max(판매가, 프라임 진입가치 V_k(1줄 고정 시), 깡통가, 계속 W) — W는 고정점
+  //  L2) 프라임: solvePrime 최적 정지
+  const Cp = cfg.prime?.cost || 0;
+  const fixedAtom = cfg.prime?.on ? primeAtomList(part, level).find((a) => a.key === cfg.prime.fixedKey) : null;
+  let prime = null, l1 = null;
+  if (fixedAtom && lCap.length > 0) {
+    prime = solvePrime(part, level, fixedAtom, lCap, allstatCount, feeMul, floorPrice, Cp, g, autoExclude);
+    const { fams, rest } = familize(lCap);
+    const cls = {};
+    enumerateRolls(part, level, "legend", (p, a1, a2, a3) => {
+      const { best } = bestHit(fams, rest, comboSums(a1, a2, a3, allstatCount));
+      const fixed = a1.key === fixedAtom.key;
+      const key = (best ? best.id : "_") + (fixed ? "|f" : "");
+      const o = cls[key] || (cls[key] = { p: 0, best, fixed }); o.p += p;
+    });
+    const classes = Object.values(cls);
+    const fv = floorPrice * feeMul;
+    const alt = (o) => {
+      const opts = [];
+      if (o.best) opts.push({ v: o.best.price * feeMul, type: "sell", rev: o.best.price * feeMul, tid: o.best.id, pn: 0 });
+      if (o.fixed) { const k = o.best ? prime.idx[o.best.id] : 0; opts.push({ v: prime.V[k], type: "prime", rev: prime.R[k], k, pn: prime.N[k] }); }
+      if (autoExclude && floorPrice > 0) opts.push({ v: fv, type: "floor", rev: fv, tid: "__floor", pn: 0 });
+      return opts.length ? opts.sort((a, b) => b.v - a.v)[0] : null;
+    };
+    let W = -Infinity;
+    if (autoExclude) {
+      W = -1e15;
+      for (let it = 0; it < 3000; it++) {
+        let sum = 0;
+        for (const o of classes) { const a = alt(o); sum += o.p * (a && a.v >= W ? a.v : W); }
+        const nw = -(Cl + g) + sum;
+        if (Math.abs(nw - W) < 1) { W = nw; break; }
+        W = nw;
+      }
+    }
+    let q = 0, rev = 0, pn = 0, pEnter = 0, pFloor = 0; const l1Cum = [];
+    for (const o of classes) {
+      const a = alt(o);
+      const exit = a && (autoExclude ? a.v >= W : true);
+      if (!exit) continue;
+      q += o.p; rev += o.p * a.rev; pn += o.p * a.pn;
+      if (a.type === "prime") pEnter += o.p;
+      if (a.type === "floor") pFloor += o.p;
+      l1Cum.push({ c: q, type: a.type, rev: a.rev, tid: a.tid, k: a.k });
+    }
+    if (q > 1e-12) {
+      legMode = "P";
+      legRolls = (1 - q) / q; legRev = rev / q; legPrimeRolls = pn / q;
+      legHitFloor = pFloor > 0 || prime.sell[0];
+      const pPrimeRoll = pn / Math.max(pEnter, 1e-12);
+      l1 = { q, cum: l1Cum, W, pEnter: pEnter / q, avgPrimeRolls: pPrimeRoll, fixedLabel: atomLabel(fixedAtom) };
+      lCap.forEach((t) => { judgeL[t.id] = autoExclude ? t.price * feeMul >= W : true; });
+    } else prime = null;
+  }
 
   // 유니크 국면 후진 재귀 (j = 유→레 천장 스택, 0~107 · 107스택이면 다음 재설정 확정)
   const N = PITY.unique + 1; // 108개 상태
@@ -328,8 +423,8 @@ function buildEngine(cfg, gShift = 0) {
   for (let j = N - 1; j >= 0; j--) {
     const up = j === N - 1 ? 1 : pL;
     const fail = 1 - up;
-    Fc[j] = Cu + up * legRolls * Cl;
-    Fn[j] = 1 + up * legRolls;
+    Fc[j] = Cu + up * (legRolls * Cl + legPrimeRolls * Cp);
+    Fn[j] = 1 + up * (legRolls + legPrimeRolls);
     Fr[j] = up * legRev;
     Fd[j][0] += up;
     if (fail > 0) {
@@ -376,7 +471,7 @@ function buildEngine(cfg, gShift = 0) {
   }
   return {
     pE, pL, epicRolls, reentry, reentryEff, gShift: g, feeMul,
-    uCap, lCap, judgeU, judgeL, activeU, activeL, legMode, legHitFloor,
+    uCap, lCap, judgeU, judgeL, activeU, activeL, legMode, legHitFloor, prime, l1, legPrimeRolls,
     uProb: uAll.satisf, lProb: lAll.satisf, uCombos, lCombos,
     uSt, lSt, round, roundDist,
     steady: { rev: sRev, cost: sCost, resets: sResets, profit: sRev - sCost - itemPrice },
@@ -433,6 +528,17 @@ function runMC(eng, cfg, startJ, samples, mode = "chain") {
         if (up) {
           j = 0; legendHit = true;
           if (eng.legMode === "A") { rev = floorPrice * eng.feeMul; tid = "__floor"; }
+          else if (eng.legMode === "P") {
+            if (rnd() >= eng.l1.q) { do { resets++; cost += costs.legend; } while (rnd() >= eng.l1.q); }
+            const e = sample(eng.l1.cum, floorPrice * eng.feeMul);
+            if (e.type === "sell") { rev = e.rev; tid = "l|" + e.tid; }
+            else if (e.type === "floor") { rev = e.rev; tid = "__floor"; }
+            else {
+              let k = e.k;
+              while (!eng.prime.sell[k]) { resets++; cost += costs.prime; const s = sample(eng.prime.cum, 0); if (s.k > k) k = s.k; }
+              rev = eng.prime.states[k].price * eng.feeMul; tid = k === 0 ? "__floor" : "p|" + eng.prime.states[k].id;
+            }
+          }
           else if (eng.legMode === "C") {
             // 매 롤이 판매 조건: 승급 롤에서 타겟 or 깡통가로 즉시 판매
             if (rnd() < eng.lSt.q) { const s = sample(eng.lSt.cum, 0); rev = s.rev; tid = "l|" + s.tid; }
@@ -519,7 +625,7 @@ const migratePrices = (sp) => {
 const C = {
   bg: "#12151b", panel: "#1a1f27", panel2: "#20262f", border: "#2c3440",
   text: "#e8e6df", sub: "#9aa3ad", accent: "#ff9d4d",
-  epic: "#b07df7", unique: "#f2c744", legend: "#79e07d", danger: "#f27a6a", ok: "#79e07d",
+  epic: "#b07df7", unique: "#f2c744", legend: "#79e07d", prime: "#5ec8f2", danger: "#f27a6a", ok: "#79e07d",
 };
 const inputStyle = {
   background: C.panel2, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text,
@@ -566,6 +672,11 @@ export default function App() {
   const [gloveRows, setGloveRows] = useState(_saved?.gloveRows?.length ? _saved.gloveRows : [{ crit: 8, statMin: 12, stat: "STR", price: "" }, { crit: 16, statMin: 0, stat: "STR", price: "" }, { crit: 24, statMin: 0, stat: "STR", price: "" }]);
   const [accPrices, setAccPrices] = useState(_saved?.accPrices ?? { drop2: "", meso2: "", dropmeso: "", dm3: "" });
   const [pityMode, setPityMode] = useState(_saved?.pityMode ?? "single"); // 스택>0 표시 모드: single | campaign
+  const [primeOn, setPrimeOn] = useState(!!_saved?.primeOn);
+  const [primeCostEok, setPrimeCostEok] = useState(_saved?.primeCostEok ?? "7");
+  const [primeFixed, setPrimeFixed] = useState(_saved?.primeFixed ?? "STR");
+  const primeOpts = useMemo(() => primeAtomList(part, level), [part, level]);
+  useEffect(() => { if (!primeOpts.some((a) => a.key === primeFixed)) setPrimeFixed(primeOpts[0].key); }, [primeOpts, primeFixed]);
 
   const firstLevelRun = useRef(true);
   const skipCostReset = useRef(false);
@@ -591,11 +702,11 @@ export default function App() {
   };
 
   // ---------- 자동 저장 & 프리셋 ----------
-  const snap = () => ({ level, part, itemPriceEok, fee, pity, floorEok, miracle, autoExclude, allstatCount, costs, statPrices, hatRows, gloveRows, accPrices, pityMode });
+  const snap = () => ({ level, part, itemPriceEok, fee, pity, floorEok, miracle, autoExclude, allstatCount, costs, statPrices, hatRows, gloveRows, accPrices, pityMode, primeOn, primeCostEok, primeFixed });
   useEffect(() => {
     const t = setTimeout(() => saveJSON(SAVE_KEY, snap()), 400);
     return () => clearTimeout(t);
-  }, [level, part, itemPriceEok, fee, pity, floorEok, miracle, autoExclude, allstatCount, costs, statPrices, hatRows, gloveRows, accPrices, pityMode]);
+  }, [level, part, itemPriceEok, fee, pity, floorEok, miracle, autoExclude, allstatCount, costs, statPrices, hatRows, gloveRows, accPrices, pityMode, primeOn, primeCostEok, primeFixed]);
 
   const [presets, setPresets] = useState(() => loadJSON(PRESET_KEY, {}));
   const [presetName, setPresetName] = useState("");
@@ -615,6 +726,7 @@ export default function App() {
     if (s.gloveRows?.length) setGloveRows(s.gloveRows);
     setAccPrices(s.accPrices ?? { drop2: "", meso2: "", dropmeso: "", dm3: "" });
     if (s.pityMode) setPityMode(s.pityMode);
+    setPrimeOn(!!s.primeOn); setPrimeCostEok(s.primeCostEok ?? "7"); if (s.primeFixed) setPrimeFixed(s.primeFixed);
   };
   const savePreset = () => {
     const name = presetName.trim();
@@ -699,7 +811,8 @@ export default function App() {
 
   const cfgInput = useMemo(() => ({
     targetsU: targets.u, targetsL: targets.l, part, level, allstatCount, miracle, autoExclude, fee, costs, itemPriceEok, floorEok, pity, pityMode,
-  }), [targets, part, level, allstatCount, miracle, autoExclude, fee, costs, itemPriceEok, floorEok, pity, pityMode]);
+    primeOn, primeCostEok, primeFixed,
+  }), [targets, part, level, allstatCount, miracle, autoExclude, fee, costs, itemPriceEok, floorEok, pity, pityMode, primeOn, primeCostEok, primeFixed]);
   const dcfg = useDeferredValue(cfgInput);
 
   const result = useMemo(() => {
@@ -709,11 +822,13 @@ export default function App() {
         part: dcfg.part, level: dcfg.level, targetsU: dcfg.targetsU, targetsL: dcfg.targetsL,
         allstatCount: dcfg.allstatCount, miracle: dcfg.miracle, autoExclude: dcfg.autoExclude,
         fee: parseFloat(dcfg.fee) || 0,
-        costs: { epic: +dcfg.costs.epic || 0, unique: +dcfg.costs.unique || 0, legend: +dcfg.costs.legend || 0 },
+        costs: { epic: +dcfg.costs.epic || 0, unique: +dcfg.costs.unique || 0, legend: +dcfg.costs.legend || 0, prime: (parseFloat(dcfg.primeCostEok) || 0) * 1e8 },
         itemPrice: (parseFloat(dcfg.itemPriceEok) || 0) * 1e8,
         floorPrice: (parseFloat(dcfg.floorEok) || 0) * 1e8,
+        prime: { on: dcfg.primeOn, cost: (parseFloat(dcfg.primeCostEok) || 0) * 1e8, fixedKey: dcfg.primeFixed },
       };
       const eng = solveEngine(cfg);
+      const base = dcfg.primeOn ? solveEngine({ ...cfg, prime: { on: false } }) : null; // 프라임 미사용 비교용
       const j0 = Math.max(0, Math.min(PITY.unique, parseInt(dcfg.pity) || 0));
       const first = eng.round(j0);
       const singleRound = j0 > 0; // 천장 스택 보유 시 단일/캠페인 기준 표시
@@ -722,7 +837,7 @@ export default function App() {
       const baseResets = mcMode === "campaign" && camp ? camp.resets : eng.steady.resets;
       const estRounds = Math.max(1000, Math.min(15000, Math.floor(1.5e6 / Math.max(20, baseResets))));
       const mc = runMC(eng, cfg, j0, estRounds, mcMode);
-      return { eng, cfg, first, j0, mc, singleRound, camp, pityMode: dcfg.pityMode };
+      return { eng, cfg, first, j0, mc, singleRound, camp, pityMode: dcfg.pityMode, base };
     } catch (e) { return { error: String(e) }; }
   }, [dcfg]);
 
@@ -760,7 +875,7 @@ export default function App() {
         if (tid === "__floor") return { label: "레전 깡통 처분", share: n / compTotal };
         const g = tid.slice(0, 1), id = tid.slice(2);
         const t = g === "u" ? byId[id]?.u : byId[id]?.l;
-        return { label: `${t ? t.label : id} · ${g === "u" ? "유니크" : "레전드리"}`, share: n / compTotal };
+        return { label: `${t ? t.label : id} · ${g === "u" ? "유니크" : g === "p" ? "레전드리 (프라임)" : "레전드리"}`, share: n / compTotal };
       })
     : [];
 
@@ -790,6 +905,8 @@ export default function App() {
             {gradeChip("유니크", C.unique, `${fmtMeso(+costs.unique)}/회`)}
             <span style={{ color: C.sub, fontSize: 12 }}>{miracle ? "2.8%" : "1.4%"} · 천장107 →</span>
             {gradeChip("레전드리", C.legend, `${fmtMeso(+costs.legend)}/회`)}
+            {primeOn && <><span style={{ color: C.sub, fontSize: 12 }}>1줄 고정 →</span>
+              {gradeChip("프라임", C.prime, `${fmtMeso((parseFloat(primeCostEok) || 0) * 1e8)}/회`)}</>}
           </div>
         </div>
 
@@ -819,6 +936,23 @@ export default function App() {
               <Toggle on={miracle} set={setMiracle} label="미라클데이 (등급업 확률 ×2)" color="#f2c744" />
               <Toggle on={autoExclude} set={setAutoExclude} label="홀드 판정 타겟 자동 제외 (최적 정책)" />
               <Toggle on={allstatCount} set={setAllstatCount} label="올스탯 줄을 스탯 합산에 포함" />
+            </div>
+            <div style={{ background: C.panel, border: `1px solid ${primeOn ? C.prime + "66" : C.border}`, borderRadius: 10, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+              <Toggle on={primeOn} set={setPrimeOn} label="프라임 큐브 모드 (레전드리 1줄 고정)" color={C.prime} />
+              {primeOn && (
+                <>
+                  <label style={{ fontSize: 12, color: C.sub }}>프라임 큐브 가격 (억 메소 / 회)
+                    <Num value={primeCostEok} onChange={setPrimeCostEok} w="100%" /></label>
+                  <label style={{ fontSize: 12, color: C.sub }}>고정할 1줄 옵션
+                    <select value={primeFixed} onChange={(e) => setPrimeFixed(e.target.value)} style={inputStyle}>
+                      {primeOpts.map((a) => <option key={a.key} value={a.key}>{atomLabel(a)}</option>)}
+                    </select></label>
+                  <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.5 }}>
+                    레전 도달 후 일반 재설정으로 1줄에 이 옵션이 뜨면 프라임으로 전환(2·3줄만 재설정, 기존/신규 중 선택 적용).
+                    유효 옵션이 먼저 뜨면 판매 — 둘 다 해당하면 판매가와 프라임 계속 가치 중 큰 쪽을 택해요.
+                  </div>
+                </>
+              )}
             </div>
             <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, letterSpacing: ".06em" }}>프리셋</div>
@@ -1013,6 +1147,24 @@ export default function App() {
                     깡통 처분가({fmtMeso((parseFloat(floorEok) || 0) * 1e8)})가 재설정 지속보다 이득이라, 레전드리 도달 즉시 판매(타겟 뜨면 타겟가)하는 정책으로 계산했어요.
                   </div>
                 )}
+                {eng.legMode === "P" && eng.l1 && (
+                  <div style={{ background: "rgba(94,200,242,.08)", border: `1px solid rgba(94,200,242,.4)`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: C.prime, lineHeight: 1.6 }}>
+                    <b>프라임 모드</b> · 1줄 <b>{eng.l1.fixedLabel}</b> 고정 · 레전 도달 후 프라임 진입 확률 <b>{fmtPct(eng.l1.pEnter)}</b>
+                    (나머지는 유효 옵션 판매{eng.legHitFloor ? "·깡통 처분" : ""}) · 진입 시 프라임 기대 <b>{eng.l1.avgPrimeRolls.toFixed(1)}회</b>
+                    ({fmtMeso(eng.l1.avgPrimeRolls * (parseFloat(primeCostEok) || 0) * 1e8)})
+                    {result.base && (
+                      <> · 프라임 미사용 시 재설정 1회당 이득 <b style={{ color: C.text }}>{(result.base.steady.profit >= 0 ? "+" : "") + fmtMeso(result.base.steady.profit / Math.max(result.base.steady.resets, 1e-9))}</b>
+                      → 프라임 사용 시 <b style={{ color: eng.steady.profit / eng.steady.resets >= result.base.steady.profit / result.base.steady.resets ? C.ok : C.danger }}>
+                      {(eng.steady.profit >= 0 ? "+" : "") + fmtMeso(eng.steady.profit / Math.max(eng.steady.resets, 1e-9))}</b>
+                      (라운드당 {(result.base.steady.profit >= 0 ? "+" : "") + fmtMeso(result.base.steady.profit)} → {(eng.steady.profit >= 0 ? "+" : "") + fmtMeso(eng.steady.profit)})</>
+                    )}
+                  </div>
+                )}
+                {primeOn && eng.legMode !== "P" && (
+                  <div style={{ background: "rgba(242,199,68,.08)", border: `1px solid rgba(242,199,68,.4)`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: C.unique }}>
+                    프라임 모드가 켜져 있지만 레전드리 타겟이 없어 프라임 단계를 계산하지 않았어요 (레전드리 매물 가격을 입력하세요).
+                  </div>
+                )}
                 {sr && (
                   <div style={{ display: "flex", gap: 6 }}>
                     {[["single", "단일 라운드"], ["campaign", "천장 소모까지 반복"]].map(([k, lb]) => (
@@ -1070,6 +1222,7 @@ export default function App() {
                       <th style={{ textAlign: "left", padding: "4px 6px" }}>타겟</th>
                       <th style={{ textAlign: "center", padding: "4px 6px" }}>유니크에서 (구간 · 가격 · 판정 · 확률/회)</th>
                       <th style={{ textAlign: "center", padding: "4px 6px" }}>레전드리에서 (구간 · 가격 · 판정 · 확률/회)</th>
+                      {eng.prime && <th style={{ textAlign: "center", padding: "4px 6px", color: C.prime }}>프라임에서 (보유 시 판정 · 확률/회)</th>}
                     </tr></thead>
                     <tbody>
                       {rowIds.map((id) => {
@@ -1089,7 +1242,17 @@ export default function App() {
                               background: hoverTid === id ? C.panel2 : "transparent" }}>
                             <td style={{ padding: "6px" }}>{row.base}</td>
                             <td style={{ padding: "6px", textAlign: "center" }}>{cell(row.u, j.u, eng.uProb[id] || 0, "홀드 · 재설정 이득")}</td>
-                            <td style={{ padding: "6px", textAlign: "center" }}>{cell(row.l, j.l, eng.lProb[id] || 0, "홀드 · 상위 노리기")}</td>
+                            <td style={{ padding: "6px", textAlign: "center" }}>{cell(row.l, j.l, eng.lProb[id] || 0, eng.legMode === "P" ? "홀드 · 재설정 계속" : "홀드 · 상위 노리기")}</td>
+                            {eng.prime && (
+                              <td style={{ padding: "6px", textAlign: "center" }}>
+                                {row.l && eng.prime.idx[id] !== undefined ? (
+                                  <>
+                                    {eng.prime.sell[eng.prime.idx[id]] ? <Badge kind="sell">판매</Badge> : <Badge kind="hold">홀드 · 프라임 계속</Badge>}
+                                    <div style={{ fontSize: 10, color: C.sub, marginTop: 3 }}>{(eng.prime.probById[id] || 0) > 1e-12 ? fmtPct(eng.prime.probById[id]) : "1줄 고정 시 도달 불가"}</div>
+                                  </>
+                                ) : <span style={{ fontSize: 11, color: C.sub }}>{row.l ? "도달 불가" : "가격 미입력"}</span>}
+                              </td>
+                            )}
                           </tr>
                         );
                       })}
@@ -1100,6 +1263,7 @@ export default function App() {
                     유니크 판정 기준: 0.97×판매가 &gt; 재진입 비용 {fmtMeso(eng.reentry)} + 에픽 구간 재설정 {eng.epicRolls.toFixed(1)}회의 기회비용(회당 {fmtMeso(eng.gShift)}) = <b style={{ color: C.text }}>{fmtMeso(eng.reentryEff)}</b> —
                     천장은 캐릭터 귀속이라 팔아도 이월되지만, 팔고 다시 올라오는 동안의 재설정은 다른 매물에 썼다면 벌었을 시간이라 비용으로 칩니다 ·
                     레전드리 판정: 계속 재설정 시 기대 수익(큐브값+기회비용 반영)과 비교(최적 정지) · 자동 제외 정책은 재설정 1회당 기대 이득이 최대가 되는 고정점으로 수렴시킨 결과예요
+                    {eng.prime && <> · 프라임 열: 1줄 고정 상태에서 그 타겟을 <b style={{ color: C.text }}>보유 중일 때</b> 판매할지(프라임 1회 더 = {fmtMeso((parseFloat(primeCostEok) || 0) * 1e8)}+기회비용) · 확률은 프라임 1회당 그 구간이 최고가로 뜰 확률 · 선택 적용이라 보유 옵션은 절대 나빠지지 않아요</>}
                   </div>
                   {hoverTid && byId[hoverTid] && (() => {
                     const row = byId[hoverTid];
@@ -1184,6 +1348,7 @@ export default function App() {
                   가정: 잠재능력 재설정(블랙큐브 동일 성능) · 에픽잠재부여주문서 비용 0 · 등업 롤은 새 등급 옵션으로 판정 ·
                   쓸만한 스킬(최대 1줄)/피격 무적류(최대 1~2줄) 재계산 규칙 반영 · "동일 결과 재출현 방지"는 무시(오차 미미) ·
                   미라클데이는 등급업 확률만 ×2 (천장 적립·옵션 확률 불변)
+                  {primeOn && <> · 프라임 큐브: 옵션 확률 블랙큐브 동일(2줄 20%·3줄 5% 상위 등급) · 조각 가치 미반영 · 구매 제한 미반영</>}
                 </div>
               </>
             )}
