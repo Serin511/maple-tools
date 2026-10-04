@@ -3,4 +3,5 @@ bundle.js
 bundle.css
 ability-worker.js
 flame-worker.js
+additional-worker.js
 dist/
