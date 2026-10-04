@@ -158,7 +158,7 @@ export default function FlamePage() {
   return <main className="flame-page">
     <header className="flame-header">
       <div><div className="flame-eyebrow">BONUS STAT STRATEGY <span>보스 방어구 · 장신구</span></div>
-        <h1>추가옵션 <em>어디서 멈출까?</em></h1>
+        <h1>추가옵션 <em>효율 계산기</em></h1>
         <p>주스텟 1%에 얼마까지 쓸 수 있나요?<br />내 스텟 효율과 재설정 비용으로 적절한 종료 기준을 계산합니다.</p>
       </div>
       <div className="flame-header-mark" aria-hidden="true"><span>✦</span><i /></div>

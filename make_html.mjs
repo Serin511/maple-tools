@@ -9,7 +9,7 @@ const html = `<!DOCTYPE html>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>메이플 계산기 · 잠재능력·어빌리티·추가옵션</title>
-<meta name="description" content="메이플스토리 잠재능력 장사 수익, 어빌리티 최적 전략, 주스텟 효율과 메소 기준 추가옵션 중단점 · 공식 확률표 기반" />
+<meta name="description" content="메이플스토리 잠재능력 장사 수익, 어빌리티 최적 전략, 추가옵션 효율 계산기로 재설정 중단점 계산 · 공식 확률표 기반" />
 <style>html,body{margin:0;padding:0;background:#12151b}#root{min-height:100vh}${css}</style>
 </head>
 <body>
