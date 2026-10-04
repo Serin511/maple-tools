@@ -157,7 +157,7 @@ export default function FlamePage() {
 
   return <main className="flame-page">
     <header className="flame-header">
-      <div><div className="flame-eyebrow">BONUS STAT STRATEGY <span>보스 장비 기준</span></div>
+      <div><div className="flame-eyebrow">BONUS STAT STRATEGY <span>보스 방어구 · 장신구</span></div>
         <h1>추가옵션 <em>어디서 멈출까?</em></h1>
         <p>주스텟 1%에 얼마까지 쓸 수 있나요?<br />내 스텟 효율과 재설정 비용으로 적절한 종료 기준을 계산합니다.</p>
       </div>
@@ -182,7 +182,7 @@ export default function FlamePage() {
             onClick={() => change({ itemLevel: level })}>{level}</button>)}</div>
           <div className="flame-reset-cost"><span>추가옵션 재설정 1회</span><b>{meso(resetCost)}</b></div>
           <p className="flame-small-note">레벨 제한은 추가옵션 수치에 반영됩니다. 재설정 비용은 레벨과 관계없이 300만 메소입니다.</p>
-          <p className="flame-small-note">보스 장비 방어구·장신구 기준입니다. 무기는 기본 공격력·마력에 따라 추가옵션이 달라져 지원하지 않습니다.</p>
+          <p className="flame-small-note">보스 방어구·장신구의 추가옵션을 계산합니다. 무기는 계산 대상에서 제외합니다.</p>
         </div>
         <div className="flame-card">
           <div className="flame-section-title"><h2>내 스텟 효율</h2><button className="flame-text-button" type="button" onClick={() => change({ efficiencies: copy(DEFAULT_FLAME_SETTINGS.efficiencies) })}>기본값</button></div>
