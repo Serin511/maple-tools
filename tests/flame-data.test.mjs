@@ -40,6 +40,20 @@ test('stat formulas change at twenty- and forty-level boundaries', () => {
   assert.equal(flameOptionAmount('tier', 250, 7), 7);
 });
 
+test('level-250 armor uses actual single and dual stat amounts for every tier', () => {
+  for (const [tier, single, dual] of [[4, 48, 28], [5, 60, 35], [6, 72, 42], [7, 84, 49]]) {
+    assert.equal(flameOptionAmount('single', 250, tier), single);
+    assert.equal(flameOptionAmount('dual', 250, tier), dual);
+  }
+  const distribution = buildFlameDistribution({ ...DEFAULT_FLAME_SETTINGS, itemLevel: 250 });
+  const mean = key => distribution.reduce((sum, row) => sum + row.p * row.stats[key], 0);
+  // One single-stat type (12/tier) and three dual-stat types (7/tier)
+  // contribute to each chosen stat; each type is selected with probability 4/19.
+  close(mean('main'), 4 / 19 * 4.98 * (12 + 3 * 7));
+  close(mean('sub'), 4 / 19 * 4.98 * (12 + 3 * 7));
+  close(distribution.reduce((sum, row) => sum + row.p, 0), 1);
+});
+
 test('base draw is normalized and matches analytic expectations across all option pools', () => {
   // The mean tier is 4*.29 + 5*.45 + 6*.25 + 7*.01 = 4.98.
   for (const itemLevel of [1, 59, 60, 69, 70, 200, 300]) {

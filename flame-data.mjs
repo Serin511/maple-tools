@@ -76,7 +76,8 @@ export function flameOptionPoolForLevel(level) {
 }
 
 export function flameOptionAmount(kind, level, tier) {
-  if (kind === 'single') return (Math.floor(level / 20) + 1) * tier;
+  // Level-250 armor uses 12 per tier rather than the general formula's 13.
+  if (kind === 'single') return (level === 250 ? 12 : Math.floor(level / 20) + 1) * tier;
   if (kind === 'dual') return (Math.floor(level / 40) + 1) * tier;
   if (kind === 'tier') return tier;
   return 0;
