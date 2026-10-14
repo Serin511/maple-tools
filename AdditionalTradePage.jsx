@@ -211,7 +211,7 @@ export default function AdditionalTradePage() {
   const gradeCards = settings.separateGrades ? [priceGrade] : [null];
 
   return <main className="flame-page at-page calculator-page">
-    <CalculatorHeader className="flame-header" eyebrow="ADDITIONAL TRADE" scope="방어구 · 장신구"
+    <CalculatorHeader className="flame-header" eyebrow="ADDITIONAL TRADE" scope="에디셔널 잠재능력"
       title={<>에디셔널 <em>잠재능력 장사</em></>}
       description={<>에디셔널 잠재능력 재설정의 기대 수익을 계산합니다.<br />매입가·판매가·재설정 비용을 입력해 매물당 순이익을 확인하세요.</>} />
     <div className="flame-layout at-layout calculator-layout">

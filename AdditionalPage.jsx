@@ -190,7 +190,7 @@ export default function AdditionalPage() {
   }
 
   return <main className="flame-page additional-page calculator-page">
-    <CalculatorHeader className="flame-header" eyebrow="ADDITIONAL POTENTIAL" scope="방어구 · 장신구"
+    <CalculatorHeader className="flame-header" eyebrow="ADDITIONAL POTENTIAL" scope="에디셔널 잠재능력"
       title={<>에디셔널 <em>전략 계산기</em></>}
       description={<>주스탯 1%에 얼마까지 쓸 수 있나요?<br />수에큐부터 등급별 재설정까지, 내 장비에서 멈출 기준을 비교합니다.</>} />
     <div className="flame-layout additional-layout calculator-layout">
