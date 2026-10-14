@@ -50,6 +50,13 @@ test('worker calculator returns the same first and campaign expectations as the 
   assert.equal(actual.simulationWarning, '');
 });
 
+test('the calculator uses the mandatory all-stat rule even for legacy disabled inputs', () => {
+  const input = settings({ allstatCount: false });
+  assert.equal(preparePotentialConfig(input).allstatCount, true);
+  assert.deepEqual(calculatePotentialStrategy(input), calculatePotentialStrategy({ ...input, allstatCount: true }));
+  assert.equal(input.allstatCount, false);
+});
+
 test('full Prime and baseline result crosses a structured-clone worker boundary without functions', () => {
   const input = settings({ targetsU: [], targetsL: [{ id: 'str36', kind: 'stat', stat: 'STR', min: 36, price: 1e6 }],
     pity: '0', floorEok: '0', primeOn: true, primeCostEok: '0.0000001' });
@@ -100,9 +107,10 @@ test('actual worker posts matching request ids, serializable results and errors 
   globalThis.self = fakeWorker;
   try {
     await import('../potential-worker.mjs');
-    fakeWorker.onmessage({ data: { id: 17, settings: settings({ pity: '0' }) } });
+    fakeWorker.onmessage({ data: { id: 17, settings: settings({ pity: '0', allstatCount: false }) } });
     assert.deepEqual(messages.map(m => [m.id, m.type]), [[17, 'progress'], [17, 'result']]);
     assert.ok(Number.isFinite(messages[1].result.first.profit));
+    assert.equal(messages[1].result.cfg.allstatCount, true);
     messages.length = 0;
     fakeWorker.onmessage({ data: { id: 18, settings: settings({ fee: '-1' }) } });
     assert.deepEqual(messages.map(m => [m.id, m.type]), [[18, 'progress'], [18, 'error']]);

@@ -68,7 +68,6 @@ export default function App() {
   const [floorEok, setFloorEok] = useState(initial?.floorEok ?? "1.5");
   const [miracle, setMiracle] = useState(!!initial?.miracle);
   const [autoExclude, setAutoExclude] = useState(initial ? initial.autoExclude !== false : true);
-  const [allstatCount, setAllstatCount] = useState(initial ? initial.allstatCount !== false : true);
   const [costs, setCosts] = useState(initial?.costs ?? { ...COST_DEFAULT[initial?.level ?? 200] });
   const [statPrices, setStatPrices] = useState(() => migratePrices(initial?.statPrices ?? {}));
   const [hatRows, setHatRows] = useState(initial.hatRows);
@@ -113,11 +112,11 @@ export default function App() {
   };
 
   // ---------- 자동 저장 & 프리셋 ----------
-  const snap = () => ({ level, part, itemPriceEok, fee, pity, floorEok, miracle, autoExclude, allstatCount, costs, statPrices, hatRows, gloveRows, accPrices, pityMode, primeOn, primeCostEok, primeFixed });
+  const snap = () => ({ level, part, itemPriceEok, fee, pity, floorEok, miracle, autoExclude, allstatCount: true, costs, statPrices, hatRows, gloveRows, accPrices, pityMode, primeOn, primeCostEok, primeFixed });
   useEffect(() => {
     const t = setTimeout(() => saveJSON(SAVE_KEY, snap()), 400);
     return () => clearTimeout(t);
-  }, [level, part, itemPriceEok, fee, pity, floorEok, miracle, autoExclude, allstatCount, costs, statPrices, hatRows, gloveRows, accPrices, pityMode, primeOn, primeCostEok, primeFixed]);
+  }, [level, part, itemPriceEok, fee, pity, floorEok, miracle, autoExclude, costs, statPrices, hatRows, gloveRows, accPrices, pityMode, primeOn, primeCostEok, primeFixed]);
 
   const [presets, setPresets] = useState(() => normalizePotentialPresets(loadJSON(PRESET_KEY, {})));
   const [presetName, setPresetName] = useState("");
@@ -130,7 +129,7 @@ export default function App() {
     if (s.level) setLevel(s.level);
     if (s.part) setPart(s.part);
     setItemPriceEok(s.itemPriceEok ?? "3"); setFee(s.fee ?? "3"); setPity(s.pity ?? "0"); setFloorEok(s.floorEok ?? "1.5");
-    setMiracle(!!s.miracle); setAutoExclude(s.autoExclude !== false); setAllstatCount(s.allstatCount !== false);
+    setMiracle(!!s.miracle); setAutoExclude(s.autoExclude !== false);
     setCosts(s.costs ?? { ...COST_DEFAULT[s.level ?? 200] });
     setStatPrices(migratePrices(s.statPrices ?? {}));
     setHatRows(s.hatRows);
@@ -221,7 +220,7 @@ export default function App() {
   targets.u.forEach((t) => (byId[t.id].u = t)); targets.l.forEach((t) => (byId[t.id].l = t));
 
   const cfgInput = useMemo(() => ({
-    targetsU: targets.u, targetsL: targets.l, part, level, allstatCount, miracle, autoExclude, fee, costs, itemPriceEok, floorEok, pity, pityMode,
+    targetsU: targets.u, targetsL: targets.l, part, level, miracle, autoExclude, fee, costs, itemPriceEok, floorEok, pity, pityMode,
     primeOn, primeCostEok, primeFixed,
     priceInputs: [
       ...(part !== "glove" ? ["u", "l"].flatMap(grade => [
@@ -232,7 +231,7 @@ export default function App() {
       ...(part === "glove" ? gloveRows.map(row => row.price) : []),
       ...(part === "acc" ? Object.values(accPrices) : []),
     ],
-  }), [thresholds, allThresholds, statPrices, hatRows, gloveRows, accPrices, targets, part, level, allstatCount, miracle, autoExclude, fee, costs, itemPriceEok, floorEok, pity, pityMode, primeOn, primeCostEok, primeFixed]);
+  }), [thresholds, allThresholds, statPrices, hatRows, gloveRows, accPrices, targets, part, level, miracle, autoExclude, fee, costs, itemPriceEok, floorEok, pity, pityMode, primeOn, primeCostEok, primeFixed]);
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('판매가를 입력하면 자동으로 계산합니다.');
@@ -354,7 +353,6 @@ export default function App() {
             <CalculatorCard as="div" className="calculator-trade-toggles">
               <Toggle on={miracle} set={setMiracle} label="미라클데이 (등급업 확률 ×2)" color="#f2c744" />
               <Toggle on={autoExclude} set={setAutoExclude} label="홀드 판정 타겟 자동 제외 (최적 정책)" />
-              <Toggle on={allstatCount} set={setAllstatCount} label="올스탯 줄을 스탯 합산에 포함" />
             </CalculatorCard>
             <CalculatorCard as="div" style={{ background: C.panel, border: `1px solid ${primeOn ? C.prime + "66" : C.border}`, borderRadius: 14, padding: "var(--ui-card-padding, 22px)", display: "flex", flexDirection: "column", gap: 10 }}>
               <Toggle on={primeOn} set={setPrimeOn} label="프라임 큐브 모드 (레전드리 1줄 고정)" color={C.prime} />
@@ -440,7 +438,7 @@ export default function App() {
                 </div>
                 <p className="trade-price-help">
                   {priceGrade === "u" ? "유니크 등급 매물" : "레전드리 등급 매물"} 기준 시세를 입력하세요 — 같은 24%라도 등급에 따라 시세가 달라 따로 받아요 ·
-                  매물 수치가 속한 구간(기준치 이상 ~ 같은 행의 다음 입력 기준치 미만)의 가격으로 판매 · 여러 행 동시 충족 시 최고가 적용 · MaxHP엔 올스탯 미합산 ·
+                  매물 수치가 속한 구간(기준치 이상 ~ 같은 행의 다음 입력 기준치 미만)의 가격으로 판매 · 여러 행 동시 충족 시 최고가 적용 · 올스탯은 STR·DEX·INT·LUK에 항상 합산(HP 제외) ·
                   올스탯 행은 올스탯% 줄만의 합계(제논용, 단일 스탯 줄 미포함)이라 기준치가 달라요
                 </p>
               </section>

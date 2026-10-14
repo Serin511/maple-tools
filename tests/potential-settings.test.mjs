@@ -46,11 +46,25 @@ test('valid inputs and blank editable numbers survive loading with level-specifi
   assert.equal(result.accPrices.dm3, 0);
   assert.equal(result.miracle, true);
   assert.equal(result.autoExclude, false);
-  assert.equal(result.allstatCount, false);
+  assert.equal(result.allstatCount, true);
   assert.equal(result.primeOn, true);
   assert.equal(result.primeFixed, 'CD2');
   assert.equal(result.pityMode, 'campaign');
   assert.equal(normalizePotentialSettings({ part: 'acc', primeFixed: 'CD2' }).primeFixed, 'STR');
+});
+
+test('retired all-stat settings and presets always restore inclusion without altering saved inputs', () => {
+  const saved = { allstatCount: false, part: 'hat', level: 250, itemPriceEok: '2.5',
+    pity: '42', statPrices: { 'l:STR_26': '12', 'l:HP_26': '5' }, hatRows: [] };
+  const before = structuredClone(saved);
+  const restored = normalizePotentialSettings(saved);
+  assert.equal(restored.allstatCount, true);
+  assert.equal(restored.itemPriceEok, saved.itemPriceEok);
+  assert.equal(restored.pity, saved.pity);
+  assert.deepEqual(restored.statPrices, saved.statPrices);
+  assert.deepEqual(restored.hatRows, []);
+  assert.deepEqual(normalizePotentialPresets({ old: saved }).old, restored);
+  assert.deepEqual(saved, before);
 });
 
 test('special rows preserve deliberate empty lists and sanitize broken rows', () => {

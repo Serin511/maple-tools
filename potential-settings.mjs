@@ -69,7 +69,8 @@ export function normalizePotentialSettings(value) {
     floorEok: scalar(own(saved, 'floorEok'), '1.5'),
     miracle: boolean(own(saved, 'miracle'), false),
     autoExclude: boolean(own(saved, 'autoExclude'), true),
-    allstatCount: boolean(own(saved, 'allstatCount'), true),
+    // Migrate the retired toggle so old settings/presets cannot disable the rule.
+    allstatCount: true,
     costs: Object.fromEntries(Object.entries(COST_DEFAULT[level]).map(([grade, fallback]) => [grade, scalar(own(costs, grade), fallback)])),
     statPrices: migratePotentialPrices(own(saved, 'statPrices')),
     hatRows: rows(own(saved, 'hatRows'), 'cd'),

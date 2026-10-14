@@ -197,14 +197,14 @@ export function enumerateRolls(part, level, grade, evalCombo, fixedAtom = null) 
 }
 
 // 3줄 조합 → 수치 합산
-export function comboSums(a1, a2, a3, allstatCount) {
+export function comboSums(a1, a2, a3) {
   const s = { STR: 0, DEX: 0, INT: 0, LUK: 0 };
   let hp = 0, crit = 0, cd = 0, drop = 0, meso = 0, allSum = 0;
   for (const a of [a1, a2, a3]) {
     if (a.kind === "stat") s[a.key] += a.value;
     else if (a.kind === "all") {
       allSum += a.value;
-      if (allstatCount) STATS.forEach((k) => (s[k] += a.value));
+      STATS.forEach((k) => (s[k] += a.value));
     }
     else if (a.kind === "hp") hp += a.value;
     else if (a.kind === "crit") crit += a.value;
@@ -273,7 +273,8 @@ export function bestHit(fams, rest, sums) {
 // 활성 타겟 집합에 대한 등급별 롤 통계
 // 스탯 계열은 구간 판정: 매물 수치가 속한 '기준치 이상 ~ 같은 계열의 다음 기준치 미만' 구간의 가격 적용
 // q: 판매 확률/회, rev: 수수료 반영 기대수익(판매 조건부), satisf: 타겟별 구간 도달 확률
-export function gradeStats(part, level, grade, targets, allstatCount, feeMul, combosOut, priceTargets = targets) {
+// 기존 호출의 인자 순서는 유지하지만 올스탯 합산은 항상 적용한다.
+export function gradeStats(part, level, grade, targets, _legacyAllstatCount, feeMul, combosOut, priceTargets = targets) {
   // 자동 홀드로 제외한 행도 가격 구간의 경계로 남는다. 낮은 가격의 상위
   // 구간을 제거했을 때 하위 구간의 높은 가격을 적용해서는 안 된다.
   const { fams, rest } = familize(priceTargets);
@@ -281,7 +282,7 @@ export function gradeStats(part, level, grade, targets, allstatCount, feeMul, co
   let q = 0, revSum = 0;
   const share = {}, satisf = {}; const cdf = [];
   enumerateRolls(part, level, grade, (p, a1, a2, a3) => {
-    const sums = comboSums(a1, a2, a3, allstatCount);
+    const sums = comboSums(a1, a2, a3);
     const hits = bestHit(fams, rest, sums).hits.filter((t) => active.has(t.id));
     const best = hits.reduce((b, t) => !b || t.price > b.price ? t : b, null);
     for (const t of hits) {
@@ -316,11 +317,12 @@ export function primeAtomList(part, level) {
 // 프라임 단계 최적 정지. '선택 적용' 덕에 보유 옵션은 단조 증가 → 상태 = 현재 보유 최고가 타겟 구간 k (0 = 타겟 없음 → 깡통가)
 //  V_k = max( v_k,  (−(C_p+g) + Σ_{m>k} P(m)·V_m) / (1 − P(new ≤ k)) )   — 새 롤 분포는 상태와 무관(1줄 고정)
 //  N_k, R_k: 계속 시 기대 프라임 횟수 / 기대 판매 수익
-export function solvePrime(part, level, fixedAtom, cands, allstatCount, feeMul, floorPrice, Cp, g, autoExclude) {
+// 기존 호출의 인자 순서는 유지하지만 올스탯 합산은 항상 적용한다.
+export function solvePrime(part, level, fixedAtom, cands, _legacyAllstatCount, feeMul, floorPrice, Cp, g, autoExclude) {
   const { fams, rest } = familize(cands);
   const pById = {}; let pNone = 0;
   enumerateRolls(part, level, "legend", (p, a1, a2, a3) => {
-    const { best } = bestHit(fams, rest, comboSums(a1, a2, a3, allstatCount));
+    const { best } = bestHit(fams, rest, comboSums(a1, a2, a3));
     if (best) pById[best.id] = (pById[best.id] || 0) + p; else pNone += p;
   }, fixedAtom);
   const floorIds = new Set(autoExclude ? cands.filter((t) => t.price <= floorPrice).map((t) => t.id) : []);
@@ -349,7 +351,7 @@ export function solvePrime(part, level, fixedAtom, cands, allstatCount, feeMul, 
 export function buildEngine(cfg, gShift = 0) {
   validateConfig(cfg);
   if (!Number.isFinite(gShift)) throw new RangeError("기회비용은 유한한 수여야 합니다.");
-  const { part, level, targetsU, targetsL, allstatCount, fee, miracle, costs, itemPrice, floorPrice, autoExclude } = cfg;
+  const { part, level, targetsU, targetsL, fee, miracle, costs, itemPrice, floorPrice, autoExclude } = cfg;
   const feeMul = 1 - fee / 100;
   const pE = Math.min(1, GRADE_UP.epic * (miracle ? 2 : 1));
   const pL = Math.min(1, GRADE_UP.unique * (miracle ? 2 : 1));
@@ -364,8 +366,8 @@ export function buildEngine(cfg, gShift = 0) {
 
   // 등급별 전체 타겟 구간 확률 + 조합 분해 (판정표 표시용) — 유니크/레전드리 가격·타겟 집합 분리
   const uCombos = {}, lCombos = {};
-  const uAll = gradeStats(part, level, "unique", targetsU, allstatCount, feeMul, uCombos);
-  const lAll = gradeStats(part, level, "legend", targetsL, allstatCount, feeMul, lCombos);
+  const uAll = gradeStats(part, level, "unique", targetsU, undefined, feeMul, uCombos);
+  const lAll = gradeStats(part, level, "legend", targetsL, undefined, feeMul, lCombos);
   const capaFrom = (st, list) => list.filter((t) => (st.satisf[t.id] || 0) > 1e-12);
   const uCap = capaFrom(uAll, targetsU), lCap = capaFrom(lAll, targetsL);
 
@@ -387,7 +389,7 @@ export function buildEngine(cfg, gShift = 0) {
     const real = S.filter((x) => x.kind !== "floor");
     const hasFloor = S.some((x) => x.kind === "floor");
     if (real.length === 0) return hasFloor ? floorPrice * feeMul - (Cl + g) : -Infinity;
-    const st = gradeStats(part, level, "legend", real, allstatCount, feeMul, undefined, targetsL);
+    const st = gradeStats(part, level, "legend", real, undefined, feeMul, undefined, targetsL);
     if (hasFloor) return st.q * st.rev + (1 - st.q) * floorPrice * feeMul - (Cl + g);
     return st.q > 1e-12 ? st.rev - (Cl + g) / st.q : -Infinity;
   };
@@ -408,8 +410,8 @@ export function buildEngine(cfg, gShift = 0) {
     ? accepted.some((x) => x.kind === "floor")
     : false; // 수동 모드에선 깡통은 폴백 전용
 
-  const uSt = gradeStats(part, level, "unique", activeU, allstatCount, feeMul, undefined, targetsU);
-  const lSt = gradeStats(part, level, "legend", activeL, allstatCount, feeMul, undefined, targetsL);
+  const uSt = gradeStats(part, level, "unique", activeU, undefined, feeMul, undefined, targetsU);
+  const lSt = gradeStats(part, level, "legend", activeL, undefined, feeMul, undefined, targetsL);
 
   // 레전드리 국면 3모드
   //  A) 활성 타겟 없음      → 승급 롤에서 깡통가로 즉시 처분
@@ -431,11 +433,11 @@ export function buildEngine(cfg, gShift = 0) {
   const fixedAtom = cfg.prime?.on ? primeAtomList(part, level).find((a) => a.key === cfg.prime.fixedKey) : null;
   let prime = null, l1 = null;
   if (fixedAtom && lCap.length > 0) {
-    prime = solvePrime(part, level, fixedAtom, lCap, allstatCount, feeMul, floorPrice, Cp, g, autoExclude);
+    prime = solvePrime(part, level, fixedAtom, lCap, undefined, feeMul, floorPrice, Cp, g, autoExclude);
     const { fams, rest } = familize(lCap);
     const cls = {};
     enumerateRolls(part, level, "legend", (p, a1, a2, a3) => {
-      const { best } = bestHit(fams, rest, comboSums(a1, a2, a3, allstatCount));
+      const { best } = bestHit(fams, rest, comboSums(a1, a2, a3));
       const fixed = a1.key === fixedAtom.key;
       const key = (best ? best.id : "_") + (fixed ? "|f" : "");
       const o = cls[key] || (cls[key] = { p: 0, best, fixed }); o.p += p;

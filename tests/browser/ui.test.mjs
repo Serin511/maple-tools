@@ -579,6 +579,79 @@ test('potential prices calculate a result and persist through navigation and rel
   });
 });
 
+test('potential always includes all-stat lines after restoring old settings and presets', { timeout: 180_000 }, async () => {
+  const settings = {
+    level: 200, part: 'heart', itemPriceEok: '2.375', fee: '2.75', pity: '0', floorEok: '1.125',
+    autoExclude: false, costs: { epic: 17000000, unique: 35000000, legend: 44000000 },
+    statPrices: { 'u:STR_12': '11.25', 'u:HP_12': '12.5' },
+  };
+  const preset = {
+    ...settings, level: 160, part: 'cape', itemPriceEok: '1.5', fee: '5', floorEok: '2',
+    costs: { epic: 16000000, unique: 33000000, legend: 41000000 },
+    statPrices: { 'u:STR_12': '15', 'u:HP_12': '16' },
+  };
+  async function assertRestored(page, expected) {
+    const equipment = page.locator('main:visible .calculator-trade-equipment');
+    for (const [label, value] of [
+      ['레벨 제한', String(expected.level)], ['착용 부위', expected.part],
+      ['노작 매입가 (억 메소)', expected.itemPriceEok], ['경매장 수수료 (%)', expected.fee],
+      ['현재 유→레 천장 스택 (0~107)', expected.pity], ['레전 깡통·잡옵 처분가 (억, 폴백용)', expected.floorEok],
+    ]) assert.equal(await equipment.getByLabel(label, { exact: true }).inputValue(), value);
+    assert.equal(await page.getByLabel('유니크 STR 12% 판매가 (억 메소)', { exact: true }).inputValue(), expected.statPrices['u:STR_12']);
+    assert.equal(await page.getByLabel('유니크 HP 12% 판매가 (억 메소)', { exact: true }).inputValue(), expected.statPrices['u:HP_12']);
+    assert.equal(await page.getByRole('switch', { name: '올스탯 줄을 스탯 합산에 포함', exact: true, includeHidden: true }).count(), 0);
+    await page.waitForFunction(expected => {
+      const saved = JSON.parse(localStorage.getItem('mpc:auto:v1'));
+      return saved?.allstatCount === true && saved.level === expected.level && saved.part === expected.part
+        && saved.statPrices['u:STR_12'] === expected.statPrices['u:STR_12'];
+    }, expected);
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('mpc:auto:v1')));
+    assert.deepEqual(saved.costs, expected.costs, 'Migrating the all-stat rule must preserve custom reset costs.');
+  }
+  async function results(page) {
+    await page.getByText('라운드당 기대 순익 (장기)', { exact: true }).waitFor({ timeout: 60_000 });
+    return {
+      targets: await page.locator('.potential-judgements tbody').innerText(),
+      profit: await page.getByText('라운드당 기대 순익 (장기)', { exact: true }).locator('..').innerText(),
+      resets: await page.getByText('라운드당 기대 재설정', { exact: true }).locator('..').innerText(),
+    };
+  }
+  const baseline = [];
+  for (const allstatCount of [true, false]) {
+    await withPage(async page => {
+      await open(page, 'potential');
+      await assertRestored(page, settings);
+      const restoredResult = await results(page);
+      if (allstatCount) baseline.push(restoredResult);
+      else assert.deepEqual(restoredResult, baseline[0], 'Old false settings must compute the same probabilities and profit as the all-stat baseline.');
+      const detail = page.getByRole('button', { name: 'STR 12%', exact: true });
+      await detail.click();
+      const panelId = await detail.getAttribute('aria-controls');
+      assert.match(await page.locator(`[id="${panelId}"]`).innerText(), /STR\+6% · 올스탯\+6%/,
+        'A stat target must include combinations that reach its threshold through all-stat lines.');
+      await detail.click();
+
+      // Change an input so applying the preset must restore a separate snapshot.
+      await page.getByLabel('노작 매입가 (억 메소)', { exact: true }).fill('99');
+      await page.getByLabel('저장된 프리셋', { exact: true }).selectOption('이전 올스탯 설정');
+      await assertRestored(page, preset);
+      const presetResult = await results(page);
+      if (allstatCount) baseline.push(presetResult);
+      else assert.deepEqual(presetResult, baseline[1], 'Applying an old false preset must retain the always-on all-stat calculation.');
+      await page.reload();
+      await page.getByRole('heading', { level: 1, name: /잠재능력.*장사/ }).waitFor();
+      await assertRestored(page, preset);
+      assert.deepEqual(await results(page), presetResult, 'The migrated rule and deterministic results must survive reload.');
+    }, {
+      data: { settings: { ...settings, allstatCount }, preset: { ...preset, allstatCount } },
+      init: ({ settings, preset }) => {
+        if (!localStorage.getItem('mpc:auto:v1')) localStorage.setItem('mpc:auto:v1', JSON.stringify(settings));
+        if (!localStorage.getItem('mpc:presets:v1')) localStorage.setItem('mpc:presets:v1', JSON.stringify({ '이전 올스탯 설정': preset }));
+      },
+    });
+  }
+});
+
 test('potential rejects blank, negative and excessive auction fees', { timeout: 120_000 }, async () => {
   await withPage(async page => {
     await open(page, 'potential');

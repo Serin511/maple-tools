@@ -16,7 +16,7 @@ export function preparePotentialConfig(input) {
   for (const price of input.priceInputs || []) if (price !== '') numeric(price, '판매가');
   return {
     part: input.part, level: input.level, targetsU: input.targetsU, targetsL: input.targetsL,
-    allstatCount: input.allstatCount, miracle: input.miracle, autoExclude: input.autoExclude,
+    allstatCount: true, miracle: input.miracle, autoExclude: input.autoExclude,
     fee: numeric(input.fee, '경매장 수수료', { max: 100 }),
     costs: Object.fromEntries(['epic', 'unique', 'legend'].map(grade => [grade, numeric(input.costs?.[grade], '재설정 비용')])),
     itemPrice: numeric(input.itemPriceEok, '노작 매입가') * 1e8,

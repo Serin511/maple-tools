@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   GRADE_UP, PITY, ESCAPE, COST_DEFAULT, POOL_TOTALS, STATS,
-  buildTierAtoms, enumerateRolls, comboSums, familize, bestHit, gradeStats,
+  buildTierAtoms, enumerateRolls, comboSums, targetSatisfied, familize, bestHit, gradeStats,
   primeAtomList, solvePrime, buildEngine, solveEngine, mulberry32,
   sampleGeometric, runMC, campaignStats,
 } from '../potential-engine.mjs';
@@ -12,7 +12,7 @@ const close = (actual, expected, tol = 1e-10) => assert.ok(
 );
 const stat = (id, min, price, name = 'STR') => ({ id, kind: 'stat', stat: name, min, price });
 const config = (overrides = {}) => ({
-  part: 'heart', level: 200, targetsU: [], targetsL: [], allstatCount: true,
+  part: 'heart', level: 200, targetsU: [], targetsL: [],
   fee: 3, miracle: false, costs: { epic: 2, unique: 3, legend: 5 },
   itemPrice: 7, floorPrice: 100, autoExclude: false, ...overrides,
 });
@@ -58,13 +58,57 @@ test('every supported Prime fixed line preserves probability and the first atom'
   }
 });
 
-test('all-stat contribution is optional and HP remains a separate family', () => {
-  const atoms = buildTierAtoms('heart', 'legend', 200).atoms;
-  const str = atoms.find(a => a.key === 'STR'), all = atoms.find(a => a.key === 'ALL'), hp = atoms.find(a => a.key === 'HP');
-  assert.deepEqual(comboSums(str, all, hp, false).s, { STR: 12, DEX: 0, INT: 0, LUK: 0 });
-  assert.deepEqual(comboSums(str, all, hp, true).s, { STR: 21, DEX: 9, INT: 9, LUK: 9 });
-  assert.equal(comboSums(str, all, hp, true).hp, 12);
-  assert.equal(comboSums(str, all, hp, true).allSum, 9);
+test('all-stat always contributes to every stat while HP and all-stat goals stay separate', () => {
+  for (const level of [200, 250]) for (const tier of ['epic', 'unique', 'legend']) {
+    const atoms = buildTierAtoms('heart', tier, level).atoms;
+    const all = atoms.find(a => a.key === 'ALL'), hp = atoms.find(a => a.key === 'HP');
+    for (const name of STATS) {
+      const statAtom = atoms.find(a => a.key === name);
+      const sums = comboSums(statAtom, all, hp);
+      assert.deepEqual(sums.s, Object.fromEntries(STATS.map(s => [s, all.value + (s === name ? statAtom.value : 0)])));
+      assert.equal(sums.hp, hp.value);
+      assert.equal(sums.allSum, all.value);
+      assert.ok(targetSatisfied({ kind: 'allsum', min: all.value }, sums));
+      assert.equal(targetSatisfied({ kind: 'allsum', min: all.value + 1 }, sums), false);
+      assert.equal(targetSatisfied({ kind: 'hp', min: hp.value + 1 }, sums), false);
+      assert.deepEqual(comboSums(statAtom, all, hp, false), sums);
+    }
+  }
+});
+
+test('all-stat lines count in regular and Prime rolls even with the old disabled argument', () => {
+  // For a 3% Unique goal, either the selected stat or ALL qualifies on each line.
+  const highMiss = 1 - (10 + 8) / POOL_TOTALS.heart.unique;
+  const lowMiss = 1 - (10 + 4) / POOL_TOTALS.heart.epic;
+  const expected = 1 - highMiss * (ESCAPE.line2 * highMiss + (1 - ESCAPE.line2) * lowMiss)
+    * (ESCAPE.line3 * highMiss + (1 - ESCAPE.line3) * lowMiss);
+  const fixedAll = primeAtomList('heart', 200).find(a => a.key === 'ALL');
+  for (const name of STATS) {
+    const target = stat(name, 3, 100, name);
+    close(gradeStats('heart', 200, 'unique', [target], false, 1).q, expected);
+    const solved = solvePrime('heart', 200, fixedAll, [stat(name, 9, 100, name)], false, 1, 0, 10, 0, false);
+    close(solved.probById[name], 1);
+    close(solved.pNone, 0);
+  }
+});
+
+test('legacy allstatCount false cannot change full engine results or Prime entry decisions', () => {
+  for (const primeOn of [false, true]) {
+    const cfg = config({ targetsU: [stat('u12', 12, 500)], targetsL: [stat('l21', 21, 1000)], floorPrice: 0,
+      prime: { on: primeOn, cost: 10, fixedKey: 'ALL' } });
+    const canonical = buildEngine(cfg);
+    const { round, roundDist, ...canonicalModel } = canonical;
+    for (const allstatCount of [false, true]) {
+      const legacy = buildEngine({ ...cfg, allstatCount });
+      const { round: legacyRound, roundDist: legacyDist, ...legacyModel } = legacy;
+      assert.deepEqual(legacyModel, canonicalModel);
+      for (const stack of [0, 50, 107]) {
+        assert.deepEqual(legacyRound(stack), round(stack));
+        assert.deepEqual(legacyDist(stack), roundDist(stack));
+      }
+    }
+    if (primeOn) assert.equal(canonical.legMode, 'P');
+  }
 });
 
 test('same-family pricing chooses its interval; different families compete by highest price', () => {
