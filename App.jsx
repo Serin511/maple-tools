@@ -352,7 +352,7 @@ export default function App() {
                 onChange: value => setPity(String(value)) }]} />
             <CalculatorCard as="div" className="calculator-trade-toggles">
               <Toggle on={miracle} set={setMiracle} label="미라클데이 (등급업 확률 ×2)" color="#f2c744" />
-              <Toggle on={autoExclude} set={setAutoExclude} label="홀드 판정 타겟 자동 제외 (최적 정책)" />
+              <Toggle on={autoExclude} set={setAutoExclude} label="판매 재설정 자동 최적화" />
             </CalculatorCard>
             <CalculatorCard as="div" style={{ background: C.panel, border: `1px solid ${primeOn ? C.prime + "66" : C.border}`, borderRadius: 14, padding: "var(--ui-card-padding, 22px)", display: "flex", flexDirection: "column", gap: 10 }}>
               <Toggle on={primeOn} set={setPrimeOn} label="프라임 큐브 모드 (레전드리 1줄 고정)" color={C.prime} />
