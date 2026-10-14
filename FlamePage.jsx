@@ -1,3 +1,4 @@
+import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton } from './ui.jsx';
 import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_FLAME_SETTINGS, validateFlameSettings, resetCostForLevel, FLAME_SOURCES } from './flame-data.mjs';
 import './flame.css';
@@ -57,7 +58,7 @@ function ScoreComparison({ current, target, formatScore }) {
 
 function OptionExamples({ examples, formatScore, showGrade }) {
   if (!examples?.length) return null;
-  return <section className="flame-card">
+  return <CalculatorCard as="section" className="flame-card">
     <div className="flame-section-title"><h2>이런 추가옵션이면 멈추세요</h2><span>종료 기준을 만족하는 예시</span></div>
     <p className="flame-muted">각 수치를 함께 얻은 조합입니다. 한 옵션만 보고 판단하지 말고, 네 옵션의 환산 합계를 확인하세요.</p>
     <div className="flame-table-scroll"><table><thead><tr><th>주스텟</th><th>부스텟</th><th>공격력·마력</th><th>올스텟</th><th>{showGrade ? '환산 급수' : '환산 주스텟 %'}</th></tr></thead>
@@ -65,7 +66,7 @@ function OptionExamples({ examples, formatScore, showGrade }) {
         <td>{number(example.stats.main)}</td><td>{number(example.stats.sub)}</td><td>{number(example.stats.attack)}</td><td>{number(example.stats.all)}%</td><td><b>{formatScore(example.score)}</b></td>
       </tr>)}</tbody></table></div>
     <p className="flame-small-note">가능한 조합 중 일부입니다. 표에 없는 결과도 환산 합계가 종료 기준 이상이면 멈출 수 있습니다.</p>
-  </section>;
+  </CalculatorCard>;
 }
 
 export default function FlamePage() {
@@ -158,24 +159,20 @@ export default function FlamePage() {
 
   const mainEquivalent = result ? toMainStat(result.targetScore) : null;
 
-  return <main className="flame-page">
-    <header className="flame-header">
-      <div><div className="flame-eyebrow">BONUS STAT STRATEGY <span>보스 방어구 · 장신구</span></div>
-        <h1>추가옵션 <em>효율 계산기</em></h1>
-        <p>주스텟 1%에 얼마까지 쓸 수 있나요?<br />내 스텟 효율과 재설정 비용으로 적절한 종료 기준을 계산합니다.</p>
-      </div>
-      <div className="flame-header-mark" aria-hidden="true"><span>✦</span><i /></div>
-    </header>
-    <div className="flame-layout">
-      <section className="flame-settings" aria-label="추가옵션 계산 설정">
-        <div className="flame-card">
+  return <main className="flame-page calculator-page">
+    <CalculatorHeader className="flame-header" eyebrow="BONUS STAT STRATEGY" scope="보스 방어구 · 장신구"
+      title={<>추가옵션 <em>효율 계산기</em></>}
+      description={<>주스탯 1%에 얼마까지 쓸 수 있나요?<br />내 스탯 효율과 재설정 비용으로 적절한 종료 기준을 계산합니다.</>} />
+    <div className="flame-layout calculator-layout">
+      <section className="flame-settings calculator-settings" aria-label="추가옵션 계산 설정">
+        <CalculatorCard as="div" className="flame-card">
           <div className="flame-section-title"><h2>현재 추가옵션</h2><span className="flame-pill">시작점</span></div>
           <p className="flame-muted">단일·이중 스텟 옵션을 합쳐, 장비에 붙은 추가옵션 수치를 입력하세요.</p>
           <div className="flame-stat-grid">{stats.map(stat => <StatInput key={stat.key} stat={stat} value={settings.current[stat.key]}
             onChange={value => change({ current: { ...settings.current, [stat.key]: value } })} />)}</div>
           <div className="flame-current-score"><span>현재 주스텟 환산 합계</span><b>{formatScore(preview)}{showGrade && <small className="flame-score-sub">주스텟 {score(preview)}</small>}</b></div>
-        </div>
-        <div className="flame-card">
+        </CalculatorCard>
+        <CalculatorCard as="div" className="flame-card">
           <h2>재설정 대상 장비</h2>
           <label className="flame-field-label">아이템의 레벨 제한
             <div className="flame-input-unit"><input aria-label="아이템의 레벨 제한" type="number" min="1" max="300" step="1" inputMode="numeric"
@@ -186,8 +183,8 @@ export default function FlamePage() {
           <div className="flame-reset-cost"><span>추가옵션 재설정 1회</span><b>{meso(resetCost)}</b></div>
           <p className="flame-small-note">레벨 제한은 추가옵션 수치에 반영됩니다. 재설정 비용은 레벨과 관계없이 300만 메소입니다.</p>
           <p className="flame-small-note">보스 방어구·장신구의 추가옵션을 계산합니다. 무기는 계산 대상에서 제외합니다.</p>
-        </div>
-        <div className="flame-card">
+        </CalculatorCard>
+        <CalculatorCard as="div" className="flame-card">
           <div className="flame-section-title"><h2>내 스텟 효율</h2><button className="flame-text-button" type="button" onClick={() => change({ efficiencies: copy(DEFAULT_FLAME_SETTINGS.efficiencies) })}>기본값</button></div>
           <p className="flame-muted">아래 수치가 주스텟 몇 %만큼 효과가 있는지 입력하세요.</p>
           <div className="flame-efficiencies">{stats.map(stat => <label key={stat.key}>
@@ -196,8 +193,8 @@ export default function FlamePage() {
               value={settings.efficiencies[stat.key]} onChange={event => change({ efficiencies: { ...settings.efficiencies, [stat.key]: event.target.value === '' ? '' : Number(event.target.value) } })} /><span>%</span></div>
           </label>)}</div>
           <p className="flame-small-note">오른쪽 숫자는 모두 주스텟 % 기준입니다.</p>
-        </div>
-        <div className="flame-card flame-price-card">
+        </CalculatorCard>
+        <CalculatorCard as="div" className="flame-card flame-price-card">
           <h2>주스텟 1%당 최대 비용</h2>
           <label className="flame-field-label">추가로 주스텟 1%를 얻는 데 쓸 금액
             <div className="flame-input-unit"><input aria-label="주스텟 1%당 지불할 최대 금액 (억 메소)" type="number" min="0" step="any" inputMode="decimal"
@@ -205,19 +202,19 @@ export default function FlamePage() {
               onChange={event => change({ mesoPerPercent: event.target.value === '' ? '' : Number(event.target.value) * 1e8 })} /><span>억 메소 / 1%</span></div>
           </label>
           <p className="flame-small-note">총 예산이 아닌 스텟 상승분의 가치입니다. 높게 입력할수록 더 좋은 추가옵션까지 재설정합니다.</p>
-        </div>
-        <button className="flame-calculate" type="button" onClick={calculate}>{busy ? '현재 설정으로 다시 계산' : '멈출 추가옵션 계산'}<span aria-hidden="true">→</span></button>
-        <p className="flame-status" role="status" aria-live="polite">{progress}</p>
+        </CalculatorCard>
+        <CalculateButton className="flame-calculate" type="button" onClick={calculate}>{busy ? '현재 설정으로 다시 계산' : '멈출 추가옵션 계산'}<span aria-hidden="true">→</span></CalculateButton>
+        <p className="flame-status calculator-status" role="status" aria-live="polite">{progress}</p>
         {error && <p className="flame-error" role="alert">{error}</p>}
       </section>
-      <section className="flame-results" aria-label="추가옵션 종료 기준 계산 결과" aria-busy={busy}>
-        {!result && <div className="flame-card flame-empty">
+      <section className="flame-results calculator-results" aria-label="추가옵션 종료 기준 계산 결과" aria-busy={busy}>
+        {!result && <CalculatorCard as="div" className="flame-card flame-empty">
           <div className="flame-empty-icon" aria-hidden="true">✦</div>
           <h2>{busy ? '내 장비의 종료 기준을 계산하고 있습니다' : '입력한 가치로 종료 기준을 계산해 주세요'}</h2>
           <p>현재 추가옵션을 유지할지, 재설정할지와<br />얼마나 좋은 옵션에서 멈추면 되는지 확인할 수 있습니다.</p>
           {busy && <div className="flame-progress" />}
           <div className="flame-empty-steps"><span>스텟 효율</span><i>＋</i><span>재설정 비용</span><i>＋</i><span>상승분의 가치</span></div>
-        </div>}
+        </CalculatorCard>}
         {result && <>
           <div className={`flame-card flame-recommendation ${result.shouldReset ? 'flame-reset' : 'flame-keep'}`}>
             <div className="flame-section-title"><span className="flame-pill">추천 종료 기준</span><span>{showGrade ? '주스텟 환산 급수' : '주스텟 % 환산'}</span></div>
@@ -233,7 +230,7 @@ export default function FlamePage() {
                 : '추가 상승분의 기대 가치가 재설정 비용을 넘지 않습니다. 입력한 스텟 가치에서는 여기서 멈추는 것이 유리합니다.'}</p></div></div>
             {result.targetScore !== null && <ScoreComparison current={result.currentScore} target={result.targetScore} formatScore={formatScore} />}
           </div>
-          <section className="flame-card">
+          <CalculatorCard as="section" className="flame-card">
             <div className="flame-section-title"><h2>여기서부터 예상되는 결과</h2><span>평균값 · 보장 수치 아님</span></div>
             <div className="flame-estimate-grid">
               <div><span>예상 재설정 횟수</span><strong>{number(result.expectedAttempts)}<small> 회</small></strong></div>
@@ -243,17 +240,17 @@ export default function FlamePage() {
             </div>
             <div className="flame-acceptance"><span>1회 재설정에서 종료 기준을 만족할 확률</span><b>{probability(result.acceptanceProbability)}</b></div>
             <p className="flame-small-note">{result.shouldReset ? '매번 결과를 확인하며 종료 기준에 도달할 때까지 재설정하는 경우입니다. 실제 소모 비용은 운에 따라 크게 달라질 수 있습니다.' : '계산 결과에 따라 추가 지출 없이 현재 옵션을 유지하는 경우입니다.'}</p>
-          </section>
+          </CalculatorCard>
           <OptionExamples examples={result.examples} formatScore={formatScore} showGrade={showGrade} />
-          {result.targetScore !== null && <section className="flame-card flame-score-guide">
+          {result.targetScore !== null && <CalculatorCard as="section" className="flame-card flame-score-guide">
             <div className="flame-section-title"><h2>실제 옵션은 이렇게 비교하세요</h2><span>네 옵션의 합계</span></div>
             <p className="flame-muted">각 옵션을 {showGrade ? '주스텟 수치' : '주스텟 %'}로 바꾼 뒤 모두 더합니다. 새로운 결과가 {formatScore(result.targetScore)} 이상이면 종료 기준에 도달한 것입니다.</p>
             {showGrade
               ? <div className="flame-formula">주스텟<br />＋ 부스텟 × {number(settings.efficiencies.sub / settings.efficiencies.main, 4)}<br />＋ 공격력·마력 × {number(settings.efficiencies.attack / settings.efficiencies.main, 4)}<br />＋ 올스텟 % × {number(10 * settings.efficiencies.all / settings.efficiencies.main, 4)}<span>= 주스텟 환산 급수</span></div>
               : <div className="flame-formula">주스텟 ÷ 10 × {number(settings.efficiencies.main, 4)}<br />＋ 부스텟 ÷ 10 × {number(settings.efficiencies.sub, 4)}<br />＋ 공격력·마력 ÷ 10 × {number(settings.efficiencies.attack, 4)}<br />＋ 올스텟 % × {number(settings.efficiencies.all, 4)}<span>= 환산 주스텟 %</span></div>}
             <p className="flame-small-note">올스텟 효율에는 주스텟·부스텟에 대한 효과를 함께 반영하세요. 장비의 기본 스텟과 잠재능력은 이 계산에 입력하지 않습니다.</p>
-          </section>}
-          <details className="flame-card flame-assumptions">
+          </CalculatorCard>}
+          <CalculatorCard as="details" className="flame-card flame-assumptions">
             <summary>계산 기준과 공식 확률 출처</summary>
             <ul>
               <li>보스 장비 방어구·장신구의 메소 추가옵션 재설정을 기준으로 합니다. 공격력·마력은 해당 캐릭터에 유효한 한 종류만 계산합니다.</li>
@@ -264,10 +261,10 @@ export default function FlamePage() {
               <li>총 예산 제한과 이벤트 할인은 반영하지 않습니다. 기댓값은 여러 번 반복했을 때의 평균으로, 한 장비의 최대 지출을 뜻하지 않습니다.</li>
             </ul>
             <div className="flame-source-links">{FLAME_SOURCES.map(source => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>)}</div>
-          </details>
+          </CalculatorCard>
         </>}
       </section>
     </div>
-    <footer className="flame-footer">메이플 계산기 · 입력값은 이 브라우저에 자동 저장됩니다.</footer>
+    <CalculatorFooter className="flame-footer">메이플 계산기 · 입력값은 이 브라우저에 자동 저장됩니다.</CalculatorFooter>
   </main>;
 }

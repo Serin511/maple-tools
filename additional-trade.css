@@ -1,15 +1,15 @@
 .at-page{--at-border:#343d49;--at-muted:#9ba5b2;--at-amber:#ffb16f}
-.at-page .additional-field select{width:100%;min-width:0;padding:9px 26px 9px 10px;color:#e7e9ed;background:#202833;border:1px solid #3b4654;border-radius:7px;font:inherit;font-size:12px;line-height:1.5;text-overflow:ellipsis}
-.at-page .additional-field select:focus-visible{outline:2px solid #ffb16f;outline-offset:2px}
-.at-layout{grid-template-columns:minmax(340px,.9fr) minmax(440px,1.1fr)}
+
+
+
 .at-number{display:flex;align-items:center;gap:7px;min-width:0}
 .at-number input{min-width:0;width:100%;box-sizing:border-box}
-.at-number small{white-space:nowrap;color:#98a2af;font-size:11px;flex-shrink:0}
+.at-number .calculator-input-suffix{white-space:nowrap;color:#98a2af;font-size:11px;flex-shrink:0}
 .at-cost-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:16px}
 .at-cost-fields .flame-field-label{margin:0}
 .at-grade-picker{display:flex;flex-direction:column;gap:8px;margin:14px 0 10px;max-width:420px;color:#cbd2da;font-size:12px}
 .at-grade-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
-.at-grade-tabs button{padding:9px 10px;border:1px solid #3b4654;border-radius:7px;background:#202833;color:#cbd2da;font:inherit;cursor:pointer}
+.at-grade-tabs button{padding:9px 10px;border:1px solid var(--ui-input-border);border-radius:7px;background:var(--ui-input);color:#cbd2da;font:inherit;cursor:pointer}
 .at-grade-tabs button:hover{border-color:#a66f4b;color:#ffc08c}
 .at-grade-tabs button[aria-selected="true"]{border-color:#ffb16f;background:#382a21;color:#ffd2ad;box-shadow:inset 0 0 0 1px #ffb16f}
 .at-grade-tabs button:focus-visible{outline:2px solid #ffb16f;outline-offset:2px}
@@ -25,10 +25,10 @@
 .at-price-row{display:grid;grid-template-columns:minmax(60px,.62fr) minmax(88px,1.1fr) minmax(86px,.9fr) minmax(105px,1.3fr) auto;align-items:end;gap:7px;padding:9px;border-radius:9px;background:#191f28;border:1px solid #303946;min-width:0}
 .at-price-row.at-plain-price-row{grid-template-columns:minmax(60px,.62fr) minmax(88px,1.1fr) minmax(105px,1.3fr) auto}
 .at-price-row label{display:flex;flex-direction:column;gap:5px;min-width:0;color:#9da8b5;font-size:10px}
-.at-price-row select,.at-preset-controls input,.at-preset-controls select{box-sizing:border-box;width:100%;min-width:0;background:#202833;color:#e7e9ed;border:1px solid #3b4654;border-radius:7px;padding:8px;font:inherit}
-.at-price-row .at-number{min-width:0;min-height:35px;padding:0 6px;background:#202833;border:1px solid #3b4654;border-radius:7px;gap:4px}
+.at-price-row select,.at-preset-controls input,.at-preset-controls select{box-sizing:border-box;width:100%;min-width:0;background:var(--ui-input);color:#e7e9ed;border:1px solid var(--ui-input-border);border-radius:7px;padding:8px;font:inherit}
+.at-price-row .at-number{min-width:0;min-height:35px;padding:0 6px;background:var(--ui-input);border:1px solid var(--ui-input-border);border-radius:7px;gap:4px}
 .at-price-row .at-number input{width:100%;min-width:20px;padding:7px 0;background:transparent;border:0;color:#e7e9ed;font:inherit;outline:none}
-.at-price-row .at-number small{font-size:9px}
+.at-price-row .at-number .calculator-input-suffix{font-size:9px}
 .at-price-row .at-price-input{grid-column:span 1}
 .at-price-row .at-remove,.at-preset-controls button{padding:8px 9px;border:1px solid #495463;border-radius:7px;background:#252d37;color:#d2d8e0;font:inherit;cursor:pointer;white-space:nowrap}
 .at-price-row .at-remove:hover,.at-preset-controls button:hover:not(:disabled){border-color:#f0a36a;color:#ffc08c}
@@ -58,13 +58,13 @@
 .at-rules h3{margin:18px 0 10px;color:#d9dce1;font-size:13px}
 .at-decision-selectors{display:flex;gap:12px;align-items:end;margin:10px 0}
 .at-decision-selectors label{display:flex;flex-direction:column;gap:6px;color:#aab3bd;font-size:11px}
-.at-decision-selectors select{padding:9px;background:#202833;border:1px solid #3b4654;border-radius:7px;color:#e7e9ed}
-.at-decision-selectors .at-number{padding:0 8px;background:#202833;border:1px solid #3b4654;border-radius:7px}
+.at-decision-selectors select{padding:9px;background:var(--ui-input);border:1px solid var(--ui-input-border);border-radius:7px;color:#e7e9ed}
+.at-decision-selectors .at-number{padding:0 8px;background:var(--ui-input);border:1px solid var(--ui-input-border);border-radius:7px}
 .at-decision-selectors .at-number input{background:transparent;border:0;color:#e7e9ed;padding:8px 0;outline:none}
 .at-impossible{padding:18px;border-radius:10px;border:1px solid #654745;background:#302220}
 .at-impossible strong{color:#ffb3a9}
 .at-impossible p{color:#d5a9a2;font-size:12px;line-height:1.6}
-@media(max-width:860px){.at-layout{grid-template-columns:1fr}.at-results{min-width:0}}
+@media(max-width:860px){.at-results{min-width:0}}
 @container (max-width:470px){
   .at-price-row,.at-price-row.at-plain-price-row{grid-template-columns:repeat(6,minmax(0,1fr));gap:7px}
   .at-price-row>label:first-child{grid-column:1 / 3;grid-row:1}

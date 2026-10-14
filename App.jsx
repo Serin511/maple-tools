@@ -1,587 +1,9 @@
-import { useState, useMemo, useEffect, useRef, useDeferredValue } from "react";
-
-/* ================================================================
-   메이플스토리 잠재능력 재설정 장사 계산기
-   - 등급업 확률/천장: 넥슨 공식 확률 페이지 (2026.07 확인)
-   - 재설정 비용: 나무위키 '잠재능력' 문서 (공식 표 전사본)
-   - 옵션 가중치: 나무위키 '잠재능력/옵션 목록' (공식 확률표 분수 변환)
-     + 모자 쿨감 배분 9:6, 유니크·레전 HP 가중치 12는 공식 확률 페이지로 보정 (2026.08~09)
-     + 200제 유니크·레전드리 전 부위 공식 크롤 JSON 1,356행 전수 대조 통과 (2026.09)
-   ================================================================ */
-
-// ---------- 고정 데이터 ----------
-const GRADE_UP = { epic: 0.035, unique: 0.014 }; // 미라클데이 ×2 (천장/옵션확률 불변)
-const PITY = { epic: 42, unique: 107 };
-const ESCAPE = { line2: 0.2, line3: 0.05 }; // 이탈 확률 (공식)
-
-const COST_DEFAULT = {
-  // 레벨 구간별 1회 비용 (메소)
-  140: { epic: 16000000, unique: 34000000, legend: 40000000 },
-  160: { epic: 17000000, unique: 36125000, legend: 42500000 },
-  200: { epic: 18000000, unique: 38250000, legend: 45000000 },
-  250: { epic: 20000000, unique: 42500000, legend: 50000000 },
-};
-
-// 부위별 옵션 풀 총 가중치 (에픽 / 유니크 / 레전드리)
-const POOL_TOTALS = {
-  acc:    { epic: 70, unique: 80,  legend: 117 }, // 벨트 외 장신구
-  belt:   { epic: 70, unique: 96,  legend: 99 },
-  hat:    { epic: 70, unique: 104, legend: 123 },
-  glove:  { epic: 82, unique: 112, legend: 120 },
-  shoes:  { epic: 70, unique: 104, legend: 108 },
-  cape:   { epic: 70, unique: 96,  legend: 99 }, // 망토·어깨장식
-  top:    { epic: 76, unique: 124, legend: 117 },
-  bottom: { epic: 70, unique: 104, legend: 99 },
-  heart:  { epic: 70, unique: 80,  legend: 81 },
-};
-
-const PART_LABELS = {
-  acc: "벨트 외 장신구", belt: "벨트", hat: "모자", glove: "장갑", shoes: "신발",
-  cape: "망토·어깨장식", top: "상의", bottom: "하의", heart: "기계심장",
-};
-const ARMOR_PARTS = ["hat", "glove", "shoes", "cape", "belt", "top", "bottom"];
-
-// 레벨별 옵션 수치 (스탯% / 올스탯% / HP%)
-const VALUES = {
-  std: { stat: { epic: 6, unique: 9, legend: 12 }, all: { epic: 3, unique: 6, legend: 9 } },
-  250: { stat: { epic: 7, unique: 10, legend: 13 }, all: { epic: 4, unique: 7, legend: 10 } },
-};
-const STATS = ["STR", "DEX", "INT", "LUK"];
-
-// 부위 × 등급(tier)별 원자 옵션 목록 생성
-function buildTierAtoms(part, tier, level) {
-  const v = level === 250 ? VALUES[250] : VALUES.std;
-  const atoms = [];
-  const add = (key, kind, weight, value = 0, max = 0) =>
-    weight > 0 && atoms.push({ key, kind, weight, value, max });
-
-  // 공통 추적 옵션
-  const sw = tier === "epic" ? 10 : tier === "unique" ? 10 : 12;
-  STATS.forEach((s) => add(s, "stat", sw, v.stat[tier]));
-  add("ALL", "all", tier === "epic" ? 4 : tier === "unique" ? 8 : 9, v.all[tier]);
-  add("HP", "hp", tier === "epic" ? 10 : 12, v.stat[tier]); // 공식: 유니크·레전드리 HP 가중치 12 (2026.09 공식 표 대조)
-
-  // 부위 전용 (레전드리)
-  if (tier === "legend") {
-    if (part === "hat") { add("CD1", "cd", 9, 1); add("CD2", "cd", 6, 2); } // 공식: -1초 7.3171%(9/123), -2초 4.8780%(6/123)
-    if (part === "glove") add("CRIT", "crit", 12, 8);
-    if (part === "acc") { add("DROP", "drop", 9, 1); add("MESO", "meso", 9, 1); }
-  }
-  // 중복 제한 옵션 (재설정 확률 재계산 규칙 반영용)
-  const usefulW = {
-    hat: { unique: 8, legend: 9 }, bottom: { unique: 8, legend: 0 },
-    shoes: { unique: 8, legend: 9 }, glove: { unique: 8, legend: 9 },
-  };
-  if (usefulW[part] && usefulW[part][tier]) add("USEFUL", "useful", usefulW[part][tier], 0, 1);
-  if (part === "top") {
-    if (tier === "epic") add("INVT", "invulT", 6, 0, 1);
-    if (tier === "unique") { add("INVT", "invulT", 8, 0, 1); add("INVP", "invulP", 8, 0, 2); }
-    if (tier === "legend") { add("INVT", "invulT", 9, 0, 1); add("INVP", "invulP", 9, 0, 2); }
-  }
-  if (ARMOR_PARTS.includes(part) && (tier === "unique" || tier === "legend"))
-    add("DMGIG", "dmgIg", tier === "unique" ? 16 : 18, 0, 2);
-
-  const total = POOL_TOTALS[part][tier];
-  const used = atoms.reduce((s, a) => s + a.weight, 0);
-  add("OTHER", "other", Math.max(0, total - used));
-  return { atoms, total };
-}
-
-// ---------- 롤 분포 열거 엔진 ----------
-// grade의 3줄 조합을 중복 제한(최대1/최대2) 규칙까지 반영해 정확 열거
-function enumerateRolls(part, level, grade, evalCombo, fixedAtom = null) {
-  const lowTier = grade === "legend" ? "unique" : "epic";
-  const hiPool = buildTierAtoms(part, grade, level);
-  const loPool = buildTierAtoms(part, lowTier, level);
-
-  const excludedW = (pool, st) => {
-    let w = 0;
-    for (const a of pool.atoms) {
-      if (a.kind === "useful" && st.useful) w += a.weight;
-      else if (a.kind === "invulT" && st.invulT) w += a.weight;
-      else if (a.kind === "invulP" && st.invulP >= 2) w += a.weight;
-      else if (a.kind === "dmgIg" && st.dmgIg >= 2) w += a.weight;
-    }
-    return w;
-  };
-  const nextState = (st, a) => ({
-    useful: st.useful || a.kind === "useful",
-    invulT: st.invulT || a.kind === "invulT",
-    invulP: st.invulP + (a.kind === "invulP" ? 1 : 0),
-    dmgIg: st.dmgIg + (a.kind === "dmgIg" ? 1 : 0),
-  });
-  const skip = (a, st) =>
-    (a.kind === "useful" && st.useful) || (a.kind === "invulT" && st.invulT) ||
-    (a.kind === "invulP" && st.invulP >= 2) || (a.kind === "dmgIg" && st.dmgIg >= 2);
-
-  const st0 = { useful: false, invulT: false, invulP: 0, dmgIg: 0 };
-  // 1줄: 표기 등급 100% (프라임 큐브: 고정 옵션 1개로 대체, p1 = 1)
-  for (const a1 of fixedAtom ? [fixedAtom] : hiPool.atoms) {
-    const p1 = fixedAtom ? 1 : a1.weight / hiPool.total;
-    if (p1 <= 0) continue;
-    const st1 = nextState(st0, a1);
-    // 2줄: 이탈 20% / 하위 80%
-    for (const [tierP2, pool2] of [[ESCAPE.line2, hiPool], [1 - ESCAPE.line2, loPool]]) {
-      const ex2 = excludedW(pool2, st1);
-      for (const a2 of pool2.atoms) {
-        if (skip(a2, st1)) continue;
-        const p2 = tierP2 * (a2.weight / (pool2.total - ex2));
-        if (p2 <= 0) continue;
-        const st2 = nextState(st1, a2);
-        // 3줄: 이탈 5% / 하위 95%
-        for (const [tierP3, pool3] of [[ESCAPE.line3, hiPool], [1 - ESCAPE.line3, loPool]]) {
-          const ex3 = excludedW(pool3, st2);
-          for (const a3 of pool3.atoms) {
-            if (skip(a3, st2)) continue;
-            const p3 = tierP3 * (a3.weight / (pool3.total - ex3));
-            if (p3 <= 0) continue;
-            evalCombo(p1 * p2 * p3, a1, a2, a3);
-          }
-        }
-      }
-    }
-  }
-}
-
-// 3줄 조합 → 수치 합산
-function comboSums(a1, a2, a3, allstatCount) {
-  const s = { STR: 0, DEX: 0, INT: 0, LUK: 0 };
-  let hp = 0, crit = 0, cd = 0, drop = 0, meso = 0, allSum = 0;
-  for (const a of [a1, a2, a3]) {
-    if (a.kind === "stat") s[a.key] += a.value;
-    else if (a.kind === "all") {
-      allSum += a.value;
-      if (allstatCount) STATS.forEach((k) => (s[k] += a.value));
-    }
-    else if (a.kind === "hp") hp += a.value;
-    else if (a.kind === "crit") crit += a.value;
-    else if (a.kind === "cd") cd += a.value;
-    else if (a.kind === "drop") drop += 1;
-    else if (a.kind === "meso") meso += 1;
-  }
-  const maxStat = Math.max(s.STR, s.DEX, s.INT, s.LUK);
-  return { s, hp, crit, cd, drop, meso, maxStat, allSum };
-}
-
-function targetSatisfied(t, sums) {
-  // 모자/장갑 동반 스탯: 지정된 단일 스탯만 유효 (직업군별 아이템 분리)
-  const statVal = t.stat ? sums.s[t.stat] : sums.maxStat;
-  switch (t.kind) {
-    case "stat": return sums.s[t.stat] >= t.min;
-    case "allsum": return sums.allSum >= t.min;
-    case "hp": return sums.hp >= t.min;
-    case "hat": return sums.cd >= t.cd && (t.statMin === 0 || statVal >= t.statMin);
-    case "glove": return sums.crit >= t.crit && (t.statMin === 0 || statVal >= t.statMin);
-    case "dm":
-      if (t.combo === "drop2") return sums.drop >= 2;
-      if (t.combo === "meso2") return sums.meso >= 2;
-      if (t.combo === "dropmeso") return sums.drop >= 1 && sums.meso >= 1;
-      if (t.combo === "dm3") return sums.drop + sums.meso >= 3;
-      return false;
-    default: return false;
-  }
-}
-
-// 스탯/HP/올스탯 타겟을 '같은 계열' 구간으로 묶기 — 서로 다른 스탯 간 교차 방지
-function familize(targets) {
-  const fams = {}; const rest = [];
-  for (const t of targets) {
-    const fk = t.kind === "stat" ? "s:" + t.stat : t.kind === "hp" ? "hp" : t.kind === "allsum" ? "all" : null;
-    if (fk) (fams[fk] = fams[fk] || []).push(t); else rest.push(t);
-  }
-  for (const k in fams) fams[k].sort((a, b) => a.min - b.min);
-  return { fams, rest };
-}
-// 3줄 조합 → 표시용 라벨 (동일 구성 합산, 기타=미추적 옵션)
-const atomLabel = (a) =>
-  a.kind === "stat" ? `${a.key}+${a.value}%`
-  : a.kind === "all" ? `올스탯+${a.value}%`
-  : a.kind === "hp" ? `HP+${a.value}%`
-  : a.kind === "cd" ? `쿨감-${a.value}초`
-  : a.kind === "crit" ? "크뎀+8%"
-  : a.kind === "drop" ? "드랍" : a.kind === "meso" ? "메획" : "기타";
-function comboLabel(a1, a2, a3) {
-  return [a1, a2, a3].map(atomLabel).sort((x, y) => (x === "기타") - (y === "기타") || x.localeCompare(y)).join(" · ");
-}
-// 3줄 합산값 → 충족 타겟 목록과 최고가 타겟 (스탯 계열은 구간 판정)
-function bestHit(fams, rest, sums) {
-  let best = null; const hits = [];
-  for (const fk in fams) {
-    const v = fk === "hp" ? sums.hp : fk === "all" ? sums.allSum : sums.s[fk.slice(2)];
-    let hit = null;
-    for (const t of fams[fk]) { if (v >= t.min) hit = t; else break; }
-    if (hit) hits.push(hit);
-  }
-  for (const t of rest) if (targetSatisfied(t, sums)) hits.push(t);
-  for (const t of hits) if (!best || t.price > best.price) best = t;
-  return { best, hits };
-}
-
-// 활성 타겟 집합에 대한 등급별 롤 통계
-// 스탯 계열은 구간 판정: 매물 수치가 속한 '기준치 이상 ~ 같은 계열의 다음 기준치 미만' 구간의 가격 적용
-// q: 판매 확률/회, rev: 수수료 반영 기대수익(판매 조건부), satisf: 타겟별 구간 도달 확률
-function gradeStats(part, level, grade, targets, allstatCount, feeMul, combosOut) {
-  const { fams, rest } = familize(targets);
-  let q = 0, revSum = 0;
-  const share = {}, satisf = {}; const cdf = [];
-  enumerateRolls(part, level, grade, (p, a1, a2, a3) => {
-    const sums = comboSums(a1, a2, a3, allstatCount);
-    const { best, hits } = bestHit(fams, rest, sums);
-    for (const t of hits) {
-      satisf[t.id] = (satisf[t.id] || 0) + p;
-      if (combosOut) {
-        const m = combosOut[t.id] || (combosOut[t.id] = {});
-        const key = comboLabel(a1, a2, a3);
-        m[key] = (m[key] || 0) + p;
-      }
-    }
-    if (best) {
-      q += p;
-      const rev = best.price * feeMul;
-      revSum += p * rev;
-      share[best.id] = (share[best.id] || 0) + p;
-      cdf.push({ p, rev, tid: best.id });
-    }
-  });
-  cdf.sort((a, b) => b.rev - a.rev);
-  let acc = 0;
-  const cum = cdf.map((e) => ({ c: (acc += e.p), rev: e.rev, tid: e.tid }));
-  return { q, rev: q > 0 ? revSum / q : 0, share, satisf, cum };
-}
-
-// ---------- 프라임 큐브 (1줄 고정 · 2·3줄만 재설정 · 기존/신규 중 선택 적용) ----------
-// 1줄로 고정 가능한 옵션 후보 (레전드리 풀의 추적 옵션)
-function primeAtomList(part, level) {
-  return buildTierAtoms(part, "legend", level).atoms.filter((a) => ["stat", "all", "hp", "cd", "crit", "drop", "meso"].includes(a.kind));
-}
-// 프라임 단계 최적 정지. '선택 적용' 덕에 보유 옵션은 단조 증가 → 상태 = 현재 보유 최고가 타겟 구간 k (0 = 타겟 없음 → 깡통가)
-//  V_k = max( v_k,  (−(C_p+g) + Σ_{m>k} P(m)·V_m) / (1 − P(new ≤ k)) )   — 새 롤 분포는 상태와 무관(1줄 고정)
-//  N_k, R_k: 계속 시 기대 프라임 횟수 / 기대 판매 수익
-function solvePrime(part, level, fixedAtom, cands, allstatCount, feeMul, floorPrice, Cp, g, autoExclude) {
-  const { fams, rest } = familize(cands);
-  const pById = {}; let pNone = 0;
-  enumerateRolls(part, level, "legend", (p, a1, a2, a3) => {
-    const { best } = bestHit(fams, rest, comboSums(a1, a2, a3, allstatCount));
-    if (best) pById[best.id] = (pById[best.id] || 0) + p; else pNone += p;
-  }, fixedAtom);
-  const states = [{ id: "__floor", price: floorPrice, p: pNone, t: null },
-    ...cands.map((t) => ({ id: t.id, price: t.price, p: pById[t.id] || 0, t })).sort((a, b) => a.price - b.price)];
-  const K = states.length;
-  const V = new Array(K), N = new Array(K), R = new Array(K), sell = new Array(K);
-  let above = 0, sPV = 0, sPN = 0, sPR = 0; // m > k 합
-  for (let k = K - 1; k >= 0; k--) {
-    const v = states[k].price * feeMul;
-    let cont = -Infinity, n = 0, r = 0;
-    if (above > 1e-12) { cont = (-(Cp + g) + sPV) / above; n = (1 + sPN) / above; r = sPR / above; }
-    const doSell = autoExclude ? v >= cont : (k > 0 || above <= 1e-12); // 수동 모드: 타겟이면 즉시 판매, 깡통이면 계속
-    sell[k] = doSell; V[k] = doSell ? v : cont; N[k] = doSell ? 0 : n; R[k] = doSell ? v : r;
-    above += states[k].p; sPV += states[k].p * V[k]; sPN += states[k].p * N[k]; sPR += states[k].p * R[k];
-  }
-  const idx = {}; states.forEach((st, i) => (idx[st.id] = i));
-  const cum = []; let c = 0; states.forEach((st, i) => { c += st.p; cum.push({ c, k: i }); });
-  return { states, idx, V, N, R, sell, cum, probById: pById, pNone };
-}
-
-// ---------- 라운드 해석 엔진 (천장 이월 마르코프) ----------
-// gShift: 재설정 1회의 기회비용(장기 회당 기대 이득). 판정(판매/홀드·최적 정지)에만 반영, 실제 비용 계산엔 미반영
-function buildEngine(cfg, gShift = 0) {
-  const { part, level, targetsU, targetsL, allstatCount, fee, miracle, costs, itemPrice, floorPrice, autoExclude } = cfg;
-  const feeMul = 1 - fee / 100;
-  const pE = Math.min(1, GRADE_UP.epic * (miracle ? 2 : 1));
-  const pL = Math.min(1, GRADE_UP.unique * (miracle ? 2 : 1));
-  const Ce = costs.epic, Cu = costs.unique, Cl = costs.legend;
-  const g = Math.max(0, gShift);
-
-  // 에픽 구간 기대 재설정 횟수 (42스택 도달 시 다음 재설정 확정 → 최대 43회)
-  let epicRolls = 0;
-  for (let k = 1; k <= PITY.epic + 1; k++) epicRolls += Math.pow(1 - pE, k - 1);
-  const reentry = itemPrice + epicRolls * Ce;            // 판매 후 재진입 비용 (실비)
-  const reentryEff = itemPrice + epicRolls * (Ce + g);   // 판정용: 에픽 구간 재설정의 기회비용 포함
-
-  // 등급별 전체 타겟 구간 확률 + 조합 분해 (판정표 표시용) — 유니크/레전드리 가격·타겟 집합 분리
-  const uCombos = {}, lCombos = {};
-  const uAll = gradeStats(part, level, "unique", targetsU, allstatCount, feeMul, uCombos);
-  const lAll = gradeStats(part, level, "legend", targetsL, allstatCount, feeMul, lCombos);
-  const capaFrom = (st, list) => list.filter((t) => (st.satisf[t.id] || 0) > 1e-12);
-  const uCap = capaFrom(uAll, targetsU), lCap = capaFrom(lAll, targetsL);
-
-  // 유니크 판정: 0.97×판매가 > 재진입 비용 + 에픽 구간 재설정 기회비용
-  // (천장은 캐릭터 귀속·이월 → 판매 후 새 매물로 같은 상태에 복귀. 단, 그 사이 에픽 재설정 ~22회는 다른 매물에 썼다면 g/회씩 벌었을 시간)
-  const judgeU = {};
-  uCap.forEach((t) => (judgeU[t.id] = t.price * feeMul > reentryEff));
-
-  // 레전드리 판정: 최적 정지 그리디 (깡통 처분가도 후보로 포함)
-  // V(S) = 활성 집합 S를 향해 계속 재설정할 때의 기대 순수익 (한 번 더 돌리는 비용 = 큐브값 + 기회비용 g)
-  //  - S에 깡통 포함 → 다음 롤이 무조건 판매됨: V = 다음 롤 기대 판매가 − (C_leg + g)
-  //  - 미포함 → V = E[수익|판매] − (C_leg + g) / q(S)
-  const lCands = [...lCap];
-  if (floorPrice > 0) lCands.push({ id: "__floor", kind: "floor", price: floorPrice, label: "깡통 처분" });
-  lCands.sort((a, b) => b.price - a.price);
-  const judgeL = {};
-  let accepted = [];
-  const contValue = (S) => {
-    const real = S.filter((x) => x.kind !== "floor");
-    const hasFloor = S.some((x) => x.kind === "floor");
-    if (real.length === 0) return hasFloor ? floorPrice * feeMul - (Cl + g) : -Infinity;
-    const st = gradeStats(part, level, "legend", real, allstatCount, feeMul);
-    if (hasFloor) return st.q * st.rev + (1 - st.q) * floorPrice * feeMul - (Cl + g);
-    return st.q > 1e-12 ? st.rev - (Cl + g) / st.q : -Infinity;
-  };
-  if (lCands.length > 0) {
-    accepted = [lCands[0]];
-    judgeL[lCands[0].id] = true;
-    for (let i = 1; i < lCands.length; i++) {
-      const t = lCands[i];
-      judgeL[t.id] = t.price * feeMul >= contValue(accepted);
-      if (judgeL[t.id]) accepted.push(t);
-    }
-  }
-
-  // 활성 집합 확정
-  const activeU = autoExclude ? uCap.filter((t) => judgeU[t.id]) : uCap;
-  const activeL = autoExclude ? accepted.filter((x) => x.kind !== "floor") : lCap;
-  const floorAccepted = autoExclude
-    ? accepted.some((x) => x.kind === "floor")
-    : false; // 수동 모드에선 깡통은 폴백 전용
-
-  const uSt = gradeStats(part, level, "unique", activeU, allstatCount, feeMul);
-  const lSt = gradeStats(part, level, "legend", activeL, allstatCount, feeMul);
-
-  // 레전드리 국면 3모드
-  //  A) 활성 타겟 없음      → 승급 롤에서 깡통가로 즉시 처분
-  //  B) 타겟 있음, 깡통 미채택 → 타겟 뜰 때까지 재설정: 추가 롤 (1-q)/q
-  //  C) 타겟 있음, 깡통 채택  → 매 롤이 판매 조건: 승급 롤에서 즉시 판매 (타겟 or 깡통가)
-  let legMode = activeL.length === 0 ? "A" : floorAccepted ? "C" : "B";
-  let legHitFloor = legMode !== "B"; // 깡통가가 수익에 관여하는지
-  let legRolls = legMode === "B" ? (1 - lSt.q) / Math.max(lSt.q, 1e-12) : 0;
-  let legRev =
-    legMode === "A" ? floorPrice * feeMul
-    : legMode === "C" ? lSt.q * lSt.rev + (1 - lSt.q) * floorPrice * feeMul
-    : lSt.rev;
-  let legPrimeRolls = 0;
-
-  // ---- 프라임 큐브 모드 (legMode "P") ----
-  //  L1) 일반 재설정: 매 롤 max(판매가, 프라임 진입가치 V_k(1줄 고정 시), 깡통가, 계속 W) — W는 고정점
-  //  L2) 프라임: solvePrime 최적 정지
-  const Cp = cfg.prime?.cost || 0;
-  const fixedAtom = cfg.prime?.on ? primeAtomList(part, level).find((a) => a.key === cfg.prime.fixedKey) : null;
-  let prime = null, l1 = null;
-  if (fixedAtom && lCap.length > 0) {
-    prime = solvePrime(part, level, fixedAtom, lCap, allstatCount, feeMul, floorPrice, Cp, g, autoExclude);
-    const { fams, rest } = familize(lCap);
-    const cls = {};
-    enumerateRolls(part, level, "legend", (p, a1, a2, a3) => {
-      const { best } = bestHit(fams, rest, comboSums(a1, a2, a3, allstatCount));
-      const fixed = a1.key === fixedAtom.key;
-      const key = (best ? best.id : "_") + (fixed ? "|f" : "");
-      const o = cls[key] || (cls[key] = { p: 0, best, fixed }); o.p += p;
-    });
-    const classes = Object.values(cls);
-    const fv = floorPrice * feeMul;
-    const alt = (o) => {
-      const opts = [];
-      if (o.best) opts.push({ v: o.best.price * feeMul, type: "sell", rev: o.best.price * feeMul, tid: o.best.id, pn: 0 });
-      if (o.fixed) { const k = o.best ? prime.idx[o.best.id] : 0; opts.push({ v: prime.V[k], type: "prime", rev: prime.R[k], k, pn: prime.N[k] }); }
-      if (autoExclude && floorPrice > 0) opts.push({ v: fv, type: "floor", rev: fv, tid: "__floor", pn: 0 });
-      return opts.length ? opts.sort((a, b) => b.v - a.v)[0] : null;
-    };
-    let W = -Infinity;
-    if (autoExclude) {
-      W = -1e15;
-      for (let it = 0; it < 3000; it++) {
-        let sum = 0;
-        for (const o of classes) { const a = alt(o); sum += o.p * (a && a.v >= W ? a.v : W); }
-        const nw = -(Cl + g) + sum;
-        if (Math.abs(nw - W) < 1) { W = nw; break; }
-        W = nw;
-      }
-    }
-    let q = 0, rev = 0, pn = 0, pEnter = 0, pFloor = 0; const l1Cum = [];
-    for (const o of classes) {
-      const a = alt(o);
-      const exit = a && (autoExclude ? a.v >= W : true);
-      if (!exit) continue;
-      q += o.p; rev += o.p * a.rev; pn += o.p * a.pn;
-      if (a.type === "prime") pEnter += o.p;
-      if (a.type === "floor") pFloor += o.p;
-      l1Cum.push({ c: q, type: a.type, rev: a.rev, tid: a.tid, k: a.k });
-    }
-    if (q > 1e-12) {
-      legMode = "P";
-      legRolls = (1 - q) / q; legRev = rev / q; legPrimeRolls = pn / q;
-      legHitFloor = pFloor > 0 || prime.sell[0];
-      const pPrimeRoll = pn / Math.max(pEnter, 1e-12);
-      l1 = { q, cum: l1Cum, W, pEnter: pEnter / q, avgPrimeRolls: pPrimeRoll, fixedLabel: atomLabel(fixedAtom) };
-      lCap.forEach((t) => { judgeL[t.id] = autoExclude ? t.price * feeMul >= W : true; });
-    } else prime = null;
-  }
-
-  // 유니크 국면 후진 재귀 (j = 유→레 천장 스택, 0~107 · 107스택이면 다음 재설정 확정)
-  const N = PITY.unique + 1; // 108개 상태
-  const Fc = new Float64Array(N), Fr = new Float64Array(N), Fn = new Float64Array(N);
-  const Fd = Array.from({ length: N }, () => new Float64Array(N));
-  for (let j = N - 1; j >= 0; j--) {
-    const up = j === N - 1 ? 1 : pL;
-    const fail = 1 - up;
-    Fc[j] = Cu + up * (legRolls * Cl + legPrimeRolls * Cp);
-    Fn[j] = 1 + up * (legRolls + legPrimeRolls);
-    Fr[j] = up * legRev;
-    Fd[j][0] += up;
-    if (fail > 0) {
-      const saleP = fail * uSt.q, contP = fail * (1 - uSt.q);
-      Fr[j] += saleP * uSt.rev;
-      Fd[j][Math.min(j + 1, N - 1)] += saleP;
-      if (contP > 0 && j + 1 < N) {
-        Fc[j] += contP * Fc[j + 1]; Fr[j] += contP * Fr[j + 1]; Fn[j] += contP * Fn[j + 1];
-        const nx = Fd[j + 1];
-        for (let k = 0; k < N; k++) Fd[j][k] += contP * nx[k];
-      }
-    }
-  }
-  // 라운드(j0): 에픽 구간 + 유니크 진입 롤 + 체인
-  const round = (j0) => {
-    const c = epicRolls * Ce + (1 - uSt.q) * Fc[j0];
-    const r = uSt.q * uSt.rev + (1 - uSt.q) * Fr[j0];
-    const n = epicRolls + (1 - uSt.q) * Fn[j0];
-    return { cost: c, rev: r, resets: n, profit: r - c - itemPrice };
-  };
-  const roundDist = (j0) => {
-    const d = new Float64Array(N);
-    d[j0] += uSt.q;
-    for (let k = 0; k < N; k++) d[k] += (1 - uSt.q) * Fd[j0][k];
-    return d;
-  };
-
-  // 정상 분포 π (천장 이월의 장기 평형)
-  let pi = new Float64Array(N); pi[0] = 1;
-  for (let it = 0; it < 300; it++) {
-    const nx = new Float64Array(N);
-    for (let j = 0; j < N; j++) {
-      if (pi[j] < 1e-14) continue;
-      const d = roundDist(j);
-      for (let k = 0; k < N; k++) nx[k] += pi[j] * d[k];
-    }
-    pi = nx;
-  }
-  let sRev = 0, sCost = 0, sResets = 0;
-  for (let j = 0; j < N; j++) {
-    if (pi[j] < 1e-14) continue;
-    const r = round(j);
-    sRev += pi[j] * r.rev; sCost += pi[j] * r.cost; sResets += pi[j] * r.resets;
-  }
-  return {
-    pE, pL, epicRolls, reentry, reentryEff, gShift: g, feeMul,
-    uCap, lCap, judgeU, judgeL, activeU, activeL, legMode, legHitFloor, prime, l1, legPrimeRolls,
-    uProb: uAll.satisf, lProb: lAll.satisf, uCombos, lCombos,
-    uSt, lSt, round, roundDist,
-    steady: { rev: sRev, cost: sCost, resets: sResets, profit: sRev - sCost - itemPrice },
-    breakeven: sRev - sCost,
-  };
-}
-
-// 재설정 1회당 기대 이득 g를 최대화하는 정책 탐색 (Dinkelbach 고정점 반복)
-//  판정은 g를 기회비용으로 쓰고, 그 판정으로 계산한 g가 다시 판정을 바꾸므로 수렴할 때까지 반복. 최고 g 정책 채택
-function solveEngine(cfg) {
-  let g = 0, best = null;
-  for (let i = 0; i < 12; i++) {
-    const eng = buildEngine(cfg, g);
-    const gNew = eng.steady.resets > 1e-9 ? eng.steady.profit / eng.steady.resets : 0;
-    if (!best || gNew > best.steady.profit / best.steady.resets + 1e-6) best = eng;
-    if (Math.abs(gNew - g) < 1e4 || !cfg.autoExclude) break; // 1만 메소/회 이하 변화면 수렴
-    g = gNew;
-  }
-  return best;
-}
-
-// ---------- 몬테카를로 (분포·구성비) ----------
-function mulberry32(a) {
-  return () => {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-function runMC(eng, cfg, startJ, samples, mode = "chain") {
-  // mode: "chain"(장기 연속) | "independent"(단일 라운드 반복) | "campaign"(천장 소모까지 라운드 반복)
-  const { costs, itemPrice, floorPrice } = cfg;
-  const rnd = mulberry32(20260721);
-  const sample = (cum, fallback) => {
-    if (!cum.length) return { rev: fallback, tid: "__floor" };
-    const r = rnd() * cum[cum.length - 1].c;
-    for (const e of cum) if (r <= e.c) return e;
-    return cum[cum.length - 1];
-  };
-  const profits = []; const tidCount = {}; let totResets = 0, totRounds = 0;
-  let j = startJ;
-  for (let i = 0; i < samples; i++) {
-    if (mode !== "chain") j = startJ; // 매 표본을 현재 스택에서 시작
-    let acc = 0, accResets = 0, legendHit = false;
-    do {
-      let cost = itemPrice, resets = 0, rev = 0, tid = null;
-      for (let k = 1; k <= PITY.epic + 1; k++) { resets++; cost += costs.epic; if (k === PITY.epic + 1 || rnd() < eng.pE) break; }
-      let done = false;
-      if (rnd() < eng.uSt.q) { const s = sample(eng.uSt.cum, 0); rev = s.rev; tid = "u|" + s.tid; done = true; }
-      while (!done) {
-        const up = j >= PITY.unique ? true : rnd() < eng.pL;
-        resets++; cost += costs.unique;
-        if (up) {
-          j = 0; legendHit = true;
-          if (eng.legMode === "A") { rev = floorPrice * eng.feeMul; tid = "__floor"; }
-          else if (eng.legMode === "P") {
-            if (rnd() >= eng.l1.q) { do { resets++; cost += costs.legend; } while (rnd() >= eng.l1.q); }
-            const e = sample(eng.l1.cum, floorPrice * eng.feeMul);
-            if (e.type === "sell") { rev = e.rev; tid = "l|" + e.tid; }
-            else if (e.type === "floor") { rev = e.rev; tid = "__floor"; }
-            else {
-              let k = e.k;
-              while (!eng.prime.sell[k]) { resets++; cost += costs.prime; const s = sample(eng.prime.cum, 0); if (s.k > k) k = s.k; }
-              rev = eng.prime.states[k].price * eng.feeMul; tid = k === 0 ? "__floor" : "p|" + eng.prime.states[k].id;
-            }
-          }
-          else if (eng.legMode === "C") {
-            // 매 롤이 판매 조건: 승급 롤에서 타겟 or 깡통가로 즉시 판매
-            if (rnd() < eng.lSt.q) { const s = sample(eng.lSt.cum, 0); rev = s.rev; tid = "l|" + s.tid; }
-            else { rev = floorPrice * eng.feeMul; tid = "__floor"; }
-          } else {
-            if (rnd() >= eng.lSt.q) { do { resets++; cost += costs.legend; } while (rnd() >= eng.lSt.q); }
-            const s = sample(eng.lSt.cum, floorPrice * eng.feeMul); rev = s.rev; tid = s.tid === "__floor" ? "__floor" : "l|" + s.tid;
-          }
-          done = true;
-        } else {
-          j++;
-          if (rnd() < eng.uSt.q) { const s = sample(eng.uSt.cum, 0); rev = s.rev; tid = "u|" + s.tid; done = true; }
-        }
-      }
-      acc += rev - cost; accResets += resets; totRounds++;
-      tidCount[tid] = (tidCount[tid] || 0) + 1;
-    } while (mode === "campaign" && !legendHit);
-    profits.push(acc);
-    totResets += accResets;
-  }
-  profits.sort((a, b) => a - b);
-  const pct = (p) => profits[Math.min(profits.length - 1, Math.floor(p * profits.length))];
-  return { p10: pct(0.1), p50: pct(0.5), p90: pct(0.9), tidCount, rounds: samples, compRounds: totRounds, avgResets: totResets / samples, avgRounds: totRounds / samples };
-}
-
-// 천장 소모(레전드리 도달)까지 라운드 반복 기대치 (j0 ≥ 1)
-// 유니크 판매 라운드는 스택 유지/증가 → 자기·상향 전이 재귀를 후진으로 풀이
-function campaignStats(eng, j0, itemPrice) {
-  const N = PITY.unique + 1;
-  const P = new Float64Array(N), R = new Float64Array(N), Ro = new Float64Array(N);
-  for (let j = N - 1; j >= 1; j--) {
-    const d = eng.roundDist(j), r = eng.round(j);
-    let p = r.profit, re = r.resets, ro = 1;
-    for (let k = j + 1; k < N; k++) {
-      if (d[k] < 1e-15) continue;
-      p += d[k] * P[k]; re += d[k] * R[k]; ro += d[k] * Ro[k];
-    }
-    const denom = Math.max(1e-9, 1 - d[j]);
-    P[j] = p / denom; R[j] = re / denom; Ro[j] = ro / denom;
-  }
-  const rounds = Math.max(Ro[j0], 1e-9);
-  return { profit: P[j0], resets: R[j0], rounds, breakeven: (P[j0] + rounds * itemPrice) / rounds };
-}
+import { useState, useMemo, useEffect, useRef } from "react";
+import { COST_DEFAULT, PART_LABELS, STATS, primeAtomList, atomLabel } from "./potential-engine.mjs";
+import { normalizePotentialSettings, normalizePotentialPresets, migratePotentialPrices as migratePrices } from "./potential-settings.mjs";
+import { preparePotentialConfig } from "./potential-calculator.mjs";
+import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, PresetControls } from "./ui.jsx";
+import "./potential.css";
 
 // ---------- 포맷 ----------
 const fmtMeso = (n) => {
@@ -610,33 +32,22 @@ const SAVE_KEY = "mpc:auto:v1";
 const PRESET_KEY = "mpc:presets:v1";
 const loadJSON = (k, fb) => { try { const v = JSON.parse(storage.getItem(k) || "null"); return v ?? fb; } catch { return fb; } };
 const saveJSON = (k, v) => { try { storage.setItem(k, JSON.stringify(v)); } catch {} };
-const _saved = loadJSON(SAVE_KEY, null);
-// 판매가 키: "u:INT_24"(유니크) / "l:INT_24"(레전드리). 구버전 무접두 키는 양쪽에 복사
-const migratePrices = (sp) => {
-  const out = {};
-  for (const k in sp || {}) {
-    if (k.startsWith("u:") || k.startsWith("l:")) out[k] = sp[k];
-    else { out["u:" + k] = sp[k]; out["l:" + k] = sp[k]; }
-  }
-  return out;
-};
-
 // ---------- UI ----------
 const C = {
-  bg: "#12151b", panel: "#1a1f27", panel2: "#20262f", border: "#2c3440",
-  text: "#e8e6df", sub: "#9aa3ad", accent: "#ff9d4d",
+  bg: "var(--ui-bg)", panel: "var(--ui-panel)", panel2: "var(--ui-input)", border: "var(--ui-border)",
+  text: "var(--ui-text)", sub: "var(--ui-muted)", accent: "#ffab68",
   epic: "#b07df7", unique: "#f2c744", legend: "#79e07d", prime: "#5ec8f2", danger: "#f27a6a", ok: "#79e07d",
 };
 const inputStyle = {
   background: C.panel2, border: `1px solid ${C.border}`, borderRadius: 6, color: C.text,
-  padding: "6px 8px", fontSize: 13, width: "100%", boxSizing: "border-box", fontFamily: "inherit",
+  padding: "9px 10px", fontSize: 13, width: "100%", boxSizing: "border-box", fontFamily: "inherit",
 };
-const Num = ({ value, onChange, w = 72, ph = "" }) => (
-  <input type="number" value={value} placeholder={ph} onChange={(e) => onChange(e.target.value)}
-    style={{ ...inputStyle, width: w, textAlign: "center" }} step="any" />
+const Num = ({ value, onChange, w = 72, ph = "", label, max, step = "any" }) => (
+  <input aria-label={label} type="number" min="0" max={max} value={value} placeholder={ph} onChange={(e) => onChange(e.target.value)}
+    style={{ ...inputStyle, width: w, textAlign: "center" }} step={step} />
 );
 const Toggle = ({ on, set, label, color = C.accent }) => (
-  <button onClick={() => set(!on)} style={{
+  <button type="button" className="potential-toggle" role="switch" aria-checked={on} onClick={() => set(!on)} style={{
     display: "flex", alignItems: "center", gap: 8, background: "none", border: "none",
     cursor: "pointer", color: C.text, fontSize: 13, padding: 0, fontFamily: "inherit" }}>
     <span style={{
@@ -657,24 +68,25 @@ const Badge = ({ kind, children }) => (
 );
 
 export default function App() {
-  const [level, setLevel] = useState(_saved?.level ?? 200);
-  const [part, setPart] = useState(_saved?.part ?? "acc");
-  const [itemPriceEok, setItemPriceEok] = useState(_saved?.itemPriceEok ?? "3");
-  const [fee, setFee] = useState(_saved?.fee ?? "3");
-  const [pity, setPity] = useState(_saved?.pity ?? "0");
-  const [floorEok, setFloorEok] = useState(_saved?.floorEok ?? "1.5");
-  const [miracle, setMiracle] = useState(!!_saved?.miracle);
-  const [autoExclude, setAutoExclude] = useState(_saved ? _saved.autoExclude !== false : true);
-  const [allstatCount, setAllstatCount] = useState(_saved ? _saved.allstatCount !== false : true);
-  const [costs, setCosts] = useState(_saved?.costs ?? { ...COST_DEFAULT[_saved?.level ?? 200] });
-  const [statPrices, setStatPrices] = useState(() => migratePrices(_saved?.statPrices ?? {}));
-  const [hatRows, setHatRows] = useState(_saved?.hatRows?.length ? _saved.hatRows : [{ cd: 2, statMin: 12, stat: "STR", price: "" }, { cd: 3, statMin: 0, stat: "STR", price: "" }, { cd: 4, statMin: 0, stat: "STR", price: "" }]);
-  const [gloveRows, setGloveRows] = useState(_saved?.gloveRows?.length ? _saved.gloveRows : [{ crit: 8, statMin: 12, stat: "STR", price: "" }, { crit: 16, statMin: 0, stat: "STR", price: "" }, { crit: 24, statMin: 0, stat: "STR", price: "" }]);
-  const [accPrices, setAccPrices] = useState(_saved?.accPrices ?? { drop2: "", meso2: "", dropmeso: "", dm3: "" });
-  const [pityMode, setPityMode] = useState(_saved?.pityMode ?? "single"); // 스택>0 표시 모드: single | campaign
-  const [primeOn, setPrimeOn] = useState(!!_saved?.primeOn);
-  const [primeCostEok, setPrimeCostEok] = useState(_saved?.primeCostEok ?? "7");
-  const [primeFixed, setPrimeFixed] = useState(_saved?.primeFixed ?? "STR");
+  const [initial] = useState(() => normalizePotentialSettings(loadJSON(SAVE_KEY, null)));
+  const [level, setLevel] = useState(initial?.level ?? 200);
+  const [part, setPart] = useState(initial?.part ?? "acc");
+  const [itemPriceEok, setItemPriceEok] = useState(initial?.itemPriceEok ?? "3");
+  const [fee, setFee] = useState(initial?.fee ?? "3");
+  const [pity, setPity] = useState(initial?.pity ?? "0");
+  const [floorEok, setFloorEok] = useState(initial?.floorEok ?? "1.5");
+  const [miracle, setMiracle] = useState(!!initial?.miracle);
+  const [autoExclude, setAutoExclude] = useState(initial ? initial.autoExclude !== false : true);
+  const [allstatCount, setAllstatCount] = useState(initial ? initial.allstatCount !== false : true);
+  const [costs, setCosts] = useState(initial?.costs ?? { ...COST_DEFAULT[initial?.level ?? 200] });
+  const [statPrices, setStatPrices] = useState(() => migratePrices(initial?.statPrices ?? {}));
+  const [hatRows, setHatRows] = useState(initial.hatRows);
+  const [gloveRows, setGloveRows] = useState(initial.gloveRows);
+  const [accPrices, setAccPrices] = useState(initial?.accPrices ?? { drop2: "", meso2: "", dropmeso: "", dm3: "" });
+  const [pityMode, setPityMode] = useState(initial?.pityMode ?? "single"); // 스택>0 표시 모드: single | campaign
+  const [primeOn, setPrimeOn] = useState(!!initial?.primeOn);
+  const [primeCostEok, setPrimeCostEok] = useState(initial?.primeCostEok ?? "7");
+  const [primeFixed, setPrimeFixed] = useState(initial?.primeFixed ?? "STR");
   const primeOpts = useMemo(() => primeAtomList(part, level), [part, level]);
   useEffect(() => { if (!primeOpts.some((a) => a.key === primeFixed)) setPrimeFixed(primeOpts[0].key); }, [primeOpts, primeFixed]);
 
@@ -708,13 +120,13 @@ export default function App() {
     return () => clearTimeout(t);
   }, [level, part, itemPriceEok, fee, pity, floorEok, miracle, autoExclude, allstatCount, costs, statPrices, hatRows, gloveRows, accPrices, pityMode, primeOn, primeCostEok, primeFixed]);
 
-  const [presets, setPresets] = useState(() => loadJSON(PRESET_KEY, {}));
+  const [presets, setPresets] = useState(() => normalizePotentialPresets(loadJSON(PRESET_KEY, {})));
   const [presetName, setPresetName] = useState("");
   const [presetSel, setPresetSel] = useState("");
   const [hoverTid, setHoverTid] = useState(null);
-  const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
   const applySnapshot = (s) => {
     if (!s) return;
+    s = normalizePotentialSettings(s);
     if (s.level && s.level !== level) skipCostReset.current = true;
     if (s.level) setLevel(s.level);
     if (s.part) setPart(s.part);
@@ -722,8 +134,8 @@ export default function App() {
     setMiracle(!!s.miracle); setAutoExclude(s.autoExclude !== false); setAllstatCount(s.allstatCount !== false);
     setCosts(s.costs ?? { ...COST_DEFAULT[s.level ?? 200] });
     setStatPrices(migratePrices(s.statPrices ?? {}));
-    if (s.hatRows?.length) setHatRows(s.hatRows);
-    if (s.gloveRows?.length) setGloveRows(s.gloveRows);
+    setHatRows(s.hatRows);
+    setGloveRows(s.gloveRows);
     setAccPrices(s.accPrices ?? { drop2: "", meso2: "", dropmeso: "", dm3: "" });
     if (s.pityMode) setPityMode(s.pityMode);
     setPrimeOn(!!s.primeOn); setPrimeCostEok(s.primeCostEok ?? "7"); if (s.primeFixed) setPrimeFixed(s.primeFixed);
@@ -812,34 +224,69 @@ export default function App() {
   const cfgInput = useMemo(() => ({
     targetsU: targets.u, targetsL: targets.l, part, level, allstatCount, miracle, autoExclude, fee, costs, itemPriceEok, floorEok, pity, pityMode,
     primeOn, primeCostEok, primeFixed,
-  }), [targets, part, level, allstatCount, miracle, autoExclude, fee, costs, itemPriceEok, floorEok, pity, pityMode, primeOn, primeCostEok, primeFixed]);
-  const dcfg = useDeferredValue(cfgInput);
-
-  const result = useMemo(() => {
-    if (dcfg.targetsU.length === 0 && dcfg.targetsL.length === 0) return null;
-    try {
-      const cfg = {
-        part: dcfg.part, level: dcfg.level, targetsU: dcfg.targetsU, targetsL: dcfg.targetsL,
-        allstatCount: dcfg.allstatCount, miracle: dcfg.miracle, autoExclude: dcfg.autoExclude,
-        fee: parseFloat(dcfg.fee) || 0,
-        costs: { epic: +dcfg.costs.epic || 0, unique: +dcfg.costs.unique || 0, legend: +dcfg.costs.legend || 0, prime: (parseFloat(dcfg.primeCostEok) || 0) * 1e8 },
-        itemPrice: (parseFloat(dcfg.itemPriceEok) || 0) * 1e8,
-        floorPrice: (parseFloat(dcfg.floorEok) || 0) * 1e8,
-        prime: { on: dcfg.primeOn, cost: (parseFloat(dcfg.primeCostEok) || 0) * 1e8, fixedKey: dcfg.primeFixed },
-      };
-      const eng = solveEngine(cfg);
-      const base = dcfg.primeOn ? solveEngine({ ...cfg, prime: { on: false } }) : null; // 프라임 미사용 비교용
-      const j0 = Math.max(0, Math.min(PITY.unique, parseInt(dcfg.pity) || 0));
-      const first = eng.round(j0);
-      const singleRound = j0 > 0; // 천장 스택 보유 시 단일/캠페인 기준 표시
-      const camp = singleRound ? campaignStats(eng, j0, cfg.itemPrice) : null;
-      const mcMode = !singleRound ? "chain" : (dcfg.pityMode === "campaign" ? "campaign" : "independent");
-      const baseResets = mcMode === "campaign" && camp ? camp.resets : eng.steady.resets;
-      const estRounds = Math.max(1000, Math.min(15000, Math.floor(1.5e6 / Math.max(20, baseResets))));
-      const mc = runMC(eng, cfg, j0, estRounds, mcMode);
-      return { eng, cfg, first, j0, mc, singleRound, camp, pityMode: dcfg.pityMode, base };
-    } catch (e) { return { error: String(e) }; }
-  }, [dcfg]);
+    priceInputs: [
+      ...(part !== "glove" ? ["u", "l"].flatMap(grade => [
+        ...[...STATS, "HP"].flatMap(stat => thresholds.map(threshold => statPrices[`${grade}:${stat}_${threshold}`] ?? "")),
+        ...allThresholds.map(threshold => statPrices[`${grade}:ALL_${threshold}`] ?? ""),
+      ]) : []),
+      ...(part === "hat" ? hatRows.map(row => row.price) : []),
+      ...(part === "glove" ? gloveRows.map(row => row.price) : []),
+      ...(part === "acc" ? Object.values(accPrices) : []),
+    ],
+  }), [thresholds, allThresholds, statPrices, hatRows, gloveRows, accPrices, targets, part, level, allstatCount, miracle, autoExclude, fee, costs, itemPriceEok, floorEok, pity, pityMode, primeOn, primeCostEok, primeFixed]);
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState('판매가를 입력하면 자동으로 계산합니다.');
+  const [recalculate, setRecalculate] = useState(0);
+  const worker = useRef(null);
+  const request = useRef(0);
+  useEffect(() => {
+    const id = ++request.current;
+    worker.current?.terminate();
+    worker.current = null;
+    setResult(null);
+    setHoverTid(null);
+    setBusy(false);
+    try { preparePotentialConfig(cfgInput); }
+    catch (failure) { setResult({ error: failure.message }); setProgress(''); return; }
+    if (!cfgInput.targetsU.length && !cfgInput.targetsL.length) {
+      setProgress('판매가를 입력하면 자동으로 계산합니다.');
+      return;
+    }
+    setBusy(true);
+    setProgress('입력한 판매 조건을 준비하고 있습니다…');
+    const timer = setTimeout(() => {
+      try {
+        const source = document.getElementById('potential-worker-source');
+        if (!source) throw new Error('계산 엔진을 불러오지 못했습니다. 페이지를 새로고침해 주세요.');
+        const url = URL.createObjectURL(new Blob([JSON.parse(source.textContent)], { type: 'text/javascript' }));
+        let engine;
+        try { engine = new Worker(url); } finally { URL.revokeObjectURL(url); }
+        worker.current = engine;
+        engine.onmessage = ({ data }) => {
+          if (request.current !== id || data.id !== id) return;
+          if (data.type === 'progress') setProgress(data.message);
+          if (data.type === 'result' || data.type === 'error') {
+            setResult(data.type === 'result' ? data.result : { error: data.message });
+            setProgress(data.type === 'result' ? '계산 완료' : '');
+            setBusy(false);
+            engine.terminate();
+            worker.current = null;
+          }
+        };
+        engine.onerror = () => {
+          if (request.current !== id) return;
+          setResult({ error: '계산 엔진을 실행하지 못했습니다. 다시 계산해 주세요.' });
+          setBusy(false); setProgress(''); engine.terminate(); worker.current = null;
+        };
+        engine.postMessage({ id, settings: cfgInput });
+      } catch (failure) {
+        if (request.current !== id) return;
+        setResult({ error: failure.message }); setBusy(false); setProgress('');
+      }
+    }, 150);
+    return () => { clearTimeout(timer); request.current += 1; worker.current?.terminate(); worker.current = null; };
+  }, [cfgInput, recalculate]);
 
   const gradeChip = (label, color, sub) => (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
@@ -880,26 +327,12 @@ export default function App() {
     : [];
 
   return (
-    <div style={{
-      minHeight: "100vh", background: C.bg, color: C.text, padding: "20px 16px",
-      fontFamily: "'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', system-ui, sans-serif" }}>
-      <style>{`
-        input[type=number]::-webkit-outer-spin-button,
-        input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-        input[type=number] { -moz-appearance: textfield; appearance: textfield; }
-      `}</style>
-      <div style={{ maxWidth: 1120, margin: "0 auto" }}>
-        {/* 헤더 */}
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, letterSpacing: "-0.02em" }}>
-              잠재능력 재설정 <span style={{ color: C.accent }}>장사 계산기</span>
-            </h1>
-            <p style={{ margin: "4px 0 0", color: C.sub, fontSize: 12 }}>
-              에픽 시작 → 종료조건 도달 시 판매 · 유→레 천장 이월 반영 · 공식 확률표 기반 정확 열거 계산
-            </p>
-          </div>
-          <div style={{ display: "flex", gap: 16, alignItems: "center", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 16px" }}>
+    <main className="calculator-page potential-page">
+      <CalculatorHeader eyebrow="POTENTIAL TRADE" scope="일반 잠재능력"
+        title={<>잠재능력 <em>장사 계산기</em></>}
+        description={<>매입가와 판매 시세로 재설정 장사의 기대 수익을 계산합니다.<br />등급업 천장 이월과 판매·홀드 최적 정책을 비교하세요.</>} />
+      <CalculatorCard as="div" className="potential-grade-path">
+          <div className="potential-grade-steps">
             {gradeChip("에픽", C.epic, `${fmtMeso(+costs.epic)}/회`)}
             <span style={{ color: C.sub, fontSize: 12 }}>{miracle ? "7%" : "3.5%"} · 천장42 →</span>
             {gradeChip("유니크", C.unique, `${fmtMeso(+costs.unique)}/회`)}
@@ -908,36 +341,36 @@ export default function App() {
             {primeOn && <><span style={{ color: C.sub, fontSize: 12 }}>1줄 고정 →</span>
               {gradeChip("프라임", C.prime, `${fmtMeso((parseFloat(primeCostEok) || 0) * 1e8)}/회`)}</>}
           </div>
-        </div>
+        </CalculatorCard>
 
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
+        <div className="calculator-layout potential-layout">
           {/* 좌측: 설정 */}
-          <div style={{ flex: "0 1 280px", minWidth: 260, display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, letterSpacing: ".06em" }}>장비 설정</div>
+          <aside className="calculator-settings potential-settings" aria-label="잠재능력 장사 설정">
+            <CalculatorCard as="div" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em" }}>장비 설정</div>
               <label style={{ fontSize: 12, color: C.sub }}>노작 매입가 (억 메소)
                 <Num value={itemPriceEok} onChange={setItemPriceEok} w="100%" /></label>
               <label style={{ fontSize: 12, color: C.sub }}>레벨 제한
-                <select value={level} onChange={(e) => setLevel(+e.target.value)} style={inputStyle}>
+                <select aria-label="레벨 제한" value={level} onChange={(e) => setLevel(+e.target.value)} style={inputStyle}>
                   {[140, 160, 200, 250].map((l) => <option key={l} value={l}>{l}제</option>)}
                 </select></label>
               <label style={{ fontSize: 12, color: C.sub }}>착용 부위
-                <select value={part} onChange={(e) => setPart(e.target.value)} style={inputStyle}>
+                <select aria-label="착용 부위" value={part} onChange={(e) => setPart(e.target.value)} style={inputStyle}>
                   {Object.entries(PART_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select></label>
               <label style={{ fontSize: 12, color: C.sub }}>현재 유→레 천장 스택 (0~107)
-                <Num value={pity} onChange={setPity} w="100%" /></label>
+                <Num value={pity} onChange={setPity} w="100%" max={107} step="1" /></label>
               <label style={{ fontSize: 12, color: C.sub }}>경매장 수수료 (%)
-                <Num value={fee} onChange={setFee} w="100%" /></label>
+                <Num value={fee} onChange={setFee} w="100%" max={100} /></label>
               <label style={{ fontSize: 12, color: C.sub }}>레전 깡통·잡옵 처분가 (억, 폴백용)
                 <Num value={floorEok} onChange={setFloorEok} w="100%" /></label>
-            </div>
-            <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+            </CalculatorCard>
+            <CalculatorCard as="div" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <Toggle on={miracle} set={setMiracle} label="미라클데이 (등급업 확률 ×2)" color="#f2c744" />
               <Toggle on={autoExclude} set={setAutoExclude} label="홀드 판정 타겟 자동 제외 (최적 정책)" />
               <Toggle on={allstatCount} set={setAllstatCount} label="올스탯 줄을 스탯 합산에 포함" />
-            </div>
-            <div style={{ background: C.panel, border: `1px solid ${primeOn ? C.prime + "66" : C.border}`, borderRadius: 10, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+            </CalculatorCard>
+            <CalculatorCard as="div" style={{ background: C.panel, border: `1px solid ${primeOn ? C.prime + "66" : C.border}`, borderRadius: 14, padding: "var(--ui-card-padding, 22px)", display: "flex", flexDirection: "column", gap: 10 }}>
               <Toggle on={primeOn} set={setPrimeOn} label="프라임 큐브 모드 (레전드리 1줄 고정)" color={C.prime} />
               {primeOn && (
                 <>
@@ -953,43 +386,29 @@ export default function App() {
                   </div>
                 </>
               )}
-            </div>
-            <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, letterSpacing: ".06em" }}>프리셋</div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <input value={presetName} placeholder="프리셋 이름" onChange={(e) => setPresetName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && savePreset()} style={{ ...inputStyle, flex: 1 }} />
-                <button onClick={savePreset} disabled={!presetName.trim()} style={{
-                  ...inputStyle, width: "auto", cursor: presetName.trim() ? "pointer" : "default",
-                  color: presetName.trim() ? C.accent : C.sub, whiteSpace: "nowrap" }}>현재 입력 저장</button>
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <select value={presetSel} onChange={(e) => { setPresetSel(e.target.value); if (e.target.value) applySnapshot(presets[e.target.value]); }}
-                  style={{ ...inputStyle, flex: 1 }}>
-                  <option value="">{Object.keys(presets).length ? "프리셋 선택 → 즉시 적용" : "저장된 프리셋 없음"}</option>
-                  {Object.keys(presets).map((n) => <option key={n} value={n}>{n}</option>)}
-                </select>
-                <button onClick={deletePreset} disabled={!presetSel} style={{
-                  ...inputStyle, width: "auto", cursor: presetSel ? "pointer" : "default",
-                  color: presetSel ? C.danger : C.sub, whiteSpace: "nowrap" }}>삭제</button>
-              </div>
+            </CalculatorCard>
+            <CalculatorCard as="div" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <h2>입력 프리셋</h2>
+              <PresetControls names={Object.keys(presets)} presetName={presetName} setPresetName={setPresetName}
+                selectedName={presetSel} onSelect={name => { setPresetSel(name); if (name) applySnapshot(presets[name]); }}
+                onSave={savePreset} onDelete={deletePreset} />
               <div style={{ fontSize: 11, color: C.sub }}>입력값은 이 브라우저에 자동 저장돼요 (새로고침해도 유지)</div>
-            </div>
-            <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, letterSpacing: ".06em" }}>재설정 비용 (메소, 수정 가능)</div>
+            </CalculatorCard>
+            <CalculatorCard as="div" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em" }}>재설정 비용 (메소, 수정 가능)</div>
               {[["epic", "에픽", C.epic], ["unique", "유니크", C.unique], ["legend", "레전드리", C.legend]].map(([k, lb, col]) => (
                 <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                   <span style={{ fontSize: 12, color: col, fontWeight: 600 }}>{lb}</span>
-                  <input type="number" value={costs[k]} onChange={(e) => setCosts({ ...costs, [k]: e.target.value })}
+                  <input aria-label={`${lb} 재설정 비용 (메소)`} type="number" min="0" value={costs[k]} onChange={(e) => setCosts({ ...costs, [k]: e.target.value })}
                     style={{ ...inputStyle, width: 130, textAlign: "right" }} />
                 </div>
               ))}
               <div style={{ fontSize: 11, color: C.sub }}>기본값: 2024.01 공식 표 ({level}제 구간)</div>
-            </div>
-          </div>
+            </CalculatorCard>
+          </aside>
 
           {/* 우측: 판매가 입력 */}
-          <div style={{ flex: "1 1 480px", minWidth: 320, display: "flex", flexDirection: "column", gap: 12 }}>
+          <section className="calculator-results potential-results" aria-label="잠재능력 판매가와 계산 결과" aria-busy={busy}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 11, color: C.sub }}>
                 판매가 입력값은 레벨·부위를 바꿔도 유지돼요 (레벨별 기준치 칸에 각각 저장)
@@ -1004,14 +423,14 @@ export default function App() {
               </button>
             </div>
             {part !== "glove" && (
-              <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 }}>
+              <CalculatorCard as="div" >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                  <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, letterSpacing: ".06em" }}>
+                  <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em" }}>
                     판매가 — 스탯 합계 (억 메소 · 빈칸 = 그 등급에선 판매 안 함)
                   </div>
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                     {[["u", "유니크 매물 가격", C.unique], ["l", "레전드리 매물 가격", C.legend]].map(([k, lb, col]) => (
-                      <button key={k} onClick={() => setPriceGrade(k)} style={{
+                      <button key={k} aria-pressed={priceGrade === k} onClick={() => setPriceGrade(k)} style={{
                         background: priceGrade === k ? `${col}22` : C.panel2,
                         border: `1px solid ${priceGrade === k ? col : C.border}`,
                         color: priceGrade === k ? col : C.sub, borderRadius: 8, padding: "5px 12px",
@@ -1038,7 +457,7 @@ export default function App() {
                           <td style={{ padding: 4, color: st === "HP" ? "#e58fb1" : C.text, fontWeight: 600 }}>{st === "HP" ? "MaxHP" : st}</td>
                           {thresholds.map((th) => (
                             <td key={th} style={{ padding: 2, textAlign: "center" }}>
-                              <Num w={62} value={statPrices[`${priceGrade}:${st}_${th}`] ?? ""} ph="—"
+                              <Num label={`${priceGrade === "u" ? "유니크" : "레전드리"} ${st} ${th}% 판매가 (억 메소)`} w={62} value={statPrices[`${priceGrade}:${st}_${th}`] ?? ""} ph="—"
                                 onChange={(v) => setStatPrices((s) => ({ ...s, [`${priceGrade}:${st}_${th}`]: v }))} />
                             </td>
                           ))}
@@ -1051,7 +470,7 @@ export default function App() {
                             {i < allThresholds.length ? (
                               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
                                 <span style={{ fontSize: 10, color: "#8fd3e5" }}>{allThresholds[i]}%↑</span>
-                                <Num w={62} value={statPrices[`${priceGrade}:ALL_${allThresholds[i]}`] ?? ""} ph="—"
+                                <Num label={`${priceGrade === "u" ? "유니크" : "레전드리"} 올스탯 ${allThresholds[i]}% 판매가 (억 메소)`} w={62} value={statPrices[`${priceGrade}:ALL_${allThresholds[i]}`] ?? ""} ph="—"
                                   onChange={(v) => setStatPrices((s) => ({ ...s, [`${priceGrade}:ALL_${allThresholds[i]}`]: v }))} />
                               </div>
                             ) : null}
@@ -1066,52 +485,52 @@ export default function App() {
                   매물 수치가 속한 구간(기준치 이상 ~ 같은 행의 다음 입력 기준치 미만)의 가격으로 판매 · 여러 행 동시 충족 시 최고가 적용 · MaxHP엔 올스탯 미합산 ·
                   올스탯 행은 올스탯% 줄만의 합계(제논용, 단일 스탯 줄 미포함)이라 기준치가 달라요
                 </div>
-              </div>
+              </CalculatorCard>
             )}
             {(part === "hat" || part === "glove") && (
-              <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 }}>
-                <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, letterSpacing: ".06em", marginBottom: 8 }}>
+              <CalculatorCard as="div" >
+                <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em", marginBottom: 8 }}>
                   {part === "hat" ? "모자 특수 잠재 (쿨감, 레전드리 전용)" : "장갑 특수 잠재 (크뎀, 레전드리 전용)"}
                 </div>
                 {(part === "hat" ? hatRows : gloveRows).map((r, i) => (
                   <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
                     {part === "hat" ? (
-                      <select value={r.cd} onChange={(e) => setHatRows(hatRows.map((x, k) => k === i ? { ...x, cd: +e.target.value } : x))} style={{ ...inputStyle, width: 110 }}>
+                      <select aria-label={`모자 ${i + 1}번 조합의 쿨감 (초)`} value={r.cd} onChange={(e) => setHatRows(hatRows.map((x, k) => k === i ? { ...x, cd: +e.target.value } : x))} style={{ ...inputStyle, width: 110 }}>
                         {[2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>쿨감 {n}초↑</option>)}
                       </select>
                     ) : (
-                      <select value={r.crit} onChange={(e) => setGloveRows(gloveRows.map((x, k) => k === i ? { ...x, crit: +e.target.value } : x))} style={{ ...inputStyle, width: 110 }}>
+                      <select aria-label={`장갑 ${i + 1}번 조합의 크리티컬 데미지 (%)`} value={r.crit} onChange={(e) => setGloveRows(gloveRows.map((x, k) => k === i ? { ...x, crit: +e.target.value } : x))} style={{ ...inputStyle, width: 110 }}>
                         {[8, 16, 24].map((n) => <option key={n} value={n}>크뎀 {n}%↑</option>)}
                       </select>
                     )}
-                    <select value={r.statMin}
+                    <select aria-label={`${part === "hat" ? "모자" : "장갑"} ${i + 1}번 조합의 최소 스탯 (%)`} value={r.statMin}
                       onChange={(e) => (part === "hat" ? setHatRows(hatRows.map((x, k) => k === i ? { ...x, statMin: +e.target.value } : x))
                         : setGloveRows(gloveRows.map((x, k) => k === i ? { ...x, statMin: +e.target.value } : x)))}
                       style={{ ...inputStyle, width: 130 }}>
-                      {statMinOpts.map((m) => <option key={m} value={m}>{m === 0 ? "스탯 무관" : `+ 스탯 ${m}%↑`}</option>)}
+                      {[...new Set([...statMinOpts, r.statMin])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{m === 0 ? "스탯 무관" : `+ 스탯 ${m}%↑`}</option>)}
                     </select>
                     {r.statMin > 0 && (
-                      <select value={r.stat || "STR"}
+                      <select aria-label={`${part === "hat" ? "모자" : "장갑"} ${i + 1}번 조합의 주스탯`} value={r.stat || "STR"}
                         onChange={(e) => (part === "hat" ? setHatRows(hatRows.map((x, k) => k === i ? { ...x, stat: e.target.value } : x))
                           : setGloveRows(gloveRows.map((x, k) => k === i ? { ...x, stat: e.target.value } : x)))}
                         style={{ ...inputStyle, width: 76 }}>
                         {STATS.map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                     )}
-                    <Num w={80} value={r.price} ph="가격(억)"
+                    <Num label={`${part === "hat" ? "모자" : "장갑"} ${i + 1}번 조합의 판매가 (억 메소)`} w={80} value={r.price} ph="가격(억)"
                       onChange={(v) => (part === "hat" ? setHatRows(hatRows.map((x, k) => k === i ? { ...x, price: v } : x))
                         : setGloveRows(gloveRows.map((x, k) => k === i ? { ...x, price: v } : x)))} />
-                    <button onClick={() => (part === "hat" ? setHatRows(hatRows.filter((_, k) => k !== i)) : setGloveRows(gloveRows.filter((_, k) => k !== i)))}
+                    <button aria-label={`${part === "hat" ? "모자" : "장갑"} ${i + 1}번 조합 삭제`} onClick={() => (part === "hat" ? setHatRows(hatRows.filter((_, k) => k !== i)) : setGloveRows(gloveRows.filter((_, k) => k !== i)))}
                       style={{ background: "none", border: "none", color: C.sub, cursor: "pointer", fontSize: 14 }}>✕</button>
                   </div>
                 ))}
                 <button onClick={() => (part === "hat" ? setHatRows([...hatRows, { cd: 2, statMin: 0, stat: "STR", price: "" }]) : setGloveRows([...gloveRows, { crit: 8, statMin: 0, stat: "STR", price: "" }]))}
                   style={{ ...inputStyle, width: "auto", cursor: "pointer", color: C.accent }}>+ 조합 추가</button>
-              </div>
+              </CalculatorCard>
             )}
             {part === "acc" && (
-              <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 }}>
-                <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, letterSpacing: ".06em", marginBottom: 8 }}>
+              <CalculatorCard as="div" >
+                <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em", marginBottom: 8 }}>
                   장신구 드메 잠재 (레전드리 전용, 줄당 20%)
                 </div>
                 <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
@@ -1121,22 +540,26 @@ export default function App() {
                     </label>
                   ))}
                 </div>
-              </div>
+              </CalculatorCard>
             )}
 
             {/* 결과 */}
+            <CalculateButton disabled={!targets.u.length && !targets.l.length}
+              onClick={() => setRecalculate(value => value + 1)}>장사 기대 수익 계산<span aria-hidden="true">→</span></CalculateButton>
+            <p className="calculator-status" role="status" aria-live="polite">{progress}</p>
             {!result && (
-              <div style={{ background: C.panel, border: `1px dashed ${C.border}`, borderRadius: 10, padding: 24, textAlign: "center", color: C.sub, fontSize: 13 }}>
-                판매가를 1개 이상 입력하면 계산이 시작됩니다
-              </div>
+              <CalculatorCard as="div" style={{ background: C.panel, border: `1px dashed ${C.border}`, borderRadius: 10, padding: 24, textAlign: "center", color: C.sub, fontSize: 13 }}>
+                {busy ? "판매 정책과 기대 수익을 계산하고 있습니다" : "판매가를 1개 이상 입력하면 계산이 시작됩니다"}
+              </CalculatorCard>
             )}
             {result && result.error && (
-              <div style={{ background: C.panel, border: `1px solid ${C.danger}`, borderRadius: 10, padding: 16, color: C.danger, fontSize: 12 }}>
+              <CalculatorCard as="div" role="alert" style={{ background: C.panel, border: `1px solid ${C.danger}`, borderRadius: 10, padding: 16, color: C.danger, fontSize: 12 }}>
                 계산 오류: {result.error}
-              </div>
+              </CalculatorCard>
             )}
             {eng && (
               <>
+                {result.campaignWarning && <p className="potential-note" role="status">천장 소모까지 반복: {result.campaignWarning} 단일 라운드와 장기 평균은 아래에 표시합니다.</p>}
                 {eng.legMode === "A" && (
                   <div style={{ background: "rgba(242,199,68,.08)", border: `1px solid rgba(242,199,68,.4)`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: C.unique }}>
                     활성 레전드리 종료조건이 없어, 레전드리 도달 시 깡통 처분가({fmtMeso((parseFloat(floorEok) || 0) * 1e8)})로 즉시 판매한다고 가정했어요.
@@ -1168,11 +591,11 @@ export default function App() {
                 {sr && (
                   <div style={{ display: "flex", gap: 6 }}>
                     {[["single", "단일 라운드"], ["campaign", "천장 소모까지 반복"]].map(([k, lb]) => (
-                      <button key={k} onClick={() => setPityMode(k)} style={{
-                        background: pityMode === k ? "rgba(255,157,77,.15)" : C.panel,
-                        border: `1px solid ${pityMode === k ? C.accent : C.border}`,
-                        color: pityMode === k ? C.accent : C.sub, borderRadius: 8, padding: "6px 14px",
-                        fontSize: 12, fontWeight: pityMode === k ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }}>
+                      <button key={k} aria-pressed={pm === k} disabled={k === "campaign" && !result.camp} onClick={() => setPityMode(k)} style={{
+                        background: pm === k ? "rgba(255,157,77,.15)" : C.panel,
+                        border: `1px solid ${pm === k ? C.accent : C.border}`,
+                        color: pm === k ? C.accent : C.sub, borderRadius: 8, padding: "6px 14px",
+                        fontSize: 12, fontWeight: pm === k ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }}>
                         {lb}
                       </button>
                     ))}
@@ -1195,7 +618,7 @@ export default function App() {
                   ))}
                 </div>
                 {sr ? (
-                  <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: C.sub }}>
+                  <CalculatorCard as="div" style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: C.sub }}>
                     {pm === "campaign" ? (
                       <>천장 {result.j0}스택을 <b style={{ color: C.text }}>레전드리 도달로 소모할 때까지 라운드 반복</b> 기준입니다 ·
                       기대 매물 수 {result.camp.rounds.toFixed(2)}개 · 장기 평균(스택 평형): 라운드당 <b style={{ color: eng.steady.profit >= 0 ? C.ok : C.danger }}>
@@ -1205,19 +628,19 @@ export default function App() {
                       {(eng.steady.profit >= 0 ? "+" : "") + fmtMeso(eng.steady.profit)}</b> / {eng.steady.resets.toFixed(1)}회 ·
                       재진입 비용(매입가+에픽 {eng.epicRolls.toFixed(1)}회): {fmtMeso(eng.reentry)}</>
                     )}
-                  </div>
+                  </CalculatorCard>
                 ) : (
-                  <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: C.sub }}>
+                  <CalculatorCard as="div" style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: C.sub }}>
                     현재 천장 {result.j0}회 기준 첫 라운드: 순익 <b style={{ color: result.first.profit >= 0 ? C.ok : C.danger }}>
                     {(result.first.profit >= 0 ? "+" : "") + fmtMeso(result.first.profit)}</b> · 재설정 {result.first.resets.toFixed(1)}회 ·
                     투입 {fmtMeso(result.first.cost)} · 재진입 비용(매입가+에픽 {eng.epicRolls.toFixed(1)}회): {fmtMeso(eng.reentry)}
-                  </div>
+                  </CalculatorCard>
                 )}
 
                 {/* 타겟 판정 */}
-                <div onMouseLeave={() => setHoverTid(null)} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 }}>
-                  <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, letterSpacing: ".06em", marginBottom: 8 }}>타겟별 판매/홀드 판정</div>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <CalculatorCard as="div" className="potential-judgements" >
+                  <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em", marginBottom: 8 }}>타겟별 판매/홀드 판정</div>
+                  <div className="potential-table-scroll"><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                     <thead><tr style={{ color: C.sub }}>
                       <th style={{ textAlign: "left", padding: "4px 6px" }}>타겟</th>
                       <th style={{ textAlign: "center", padding: "4px 6px" }}>유니크에서 (구간 · 가격 · 판정 · 확률/회)</th>
@@ -1236,11 +659,10 @@ export default function App() {
                           </>
                         ) : <span style={{ fontSize: 11, color: C.sub }}>가격 미입력</span>;
                         return (
-                          <tr key={id} onMouseEnter={(e) => { setHoverTid(id); setHoverPos({ x: e.clientX, y: e.clientY }); }}
-                            onClick={(e) => { setHoverPos({ x: e.clientX, y: e.clientY }); setHoverTid(hoverTid === id ? null : id); }}
+                          <tr key={id}
                             style={{ borderTop: `1px solid ${C.border}`, cursor: "pointer",
                               background: hoverTid === id ? C.panel2 : "transparent" }}>
-                            <td style={{ padding: "6px" }}>{row.base}</td>
+                            <td style={{ padding: "6px" }}><button className="potential-detail-toggle" aria-expanded={hoverTid === id} aria-controls={`potential-detail-${id}`} onClick={() => setHoverTid(hoverTid === id ? null : id)}>{row.base}<span aria-hidden="true"> {hoverTid === id ? '−' : '+'}</span></button></td>
                             <td style={{ padding: "6px", textAlign: "center" }}>{cell(row.u, j.u, eng.uProb[id] || 0, "홀드 · 재설정 이득")}</td>
                             <td style={{ padding: "6px", textAlign: "center" }}>{cell(row.l, j.l, eng.lProb[id] || 0, eng.legMode === "P" ? "홀드 · 재설정 계속" : "홀드 · 상위 노리기")}</td>
                             {eng.prime && (
@@ -1257,10 +679,10 @@ export default function App() {
                         );
                       })}
                     </tbody>
-                  </table>
+                  </table></div>
                   <div style={{ fontSize: 11, color: C.sub, marginTop: 8 }}>
-                    구간은 등급별 입력 기준치 기준 · 확률은 해당 구간 도달 확률/회 · 행에 마우스를 올리면(또는 탭하면) 도달 가능한 옵션 조합별 확률을 보여줘요 ·
-                    유니크 판정 기준: 0.97×판매가 &gt; 재진입 비용 {fmtMeso(eng.reentry)} + 에픽 구간 재설정 {eng.epicRolls.toFixed(1)}회의 기회비용(회당 {fmtMeso(eng.gShift)}) = <b style={{ color: C.text }}>{fmtMeso(eng.reentryEff)}</b> —
+                    구간은 등급별 입력 기준치 기준 · 확률은 해당 구간 도달 확률/회 · 타겟 버튼을 누르면 도달 가능한 옵션 조합별 확률을 보여줘요 ·
+                    유니크 판정 기준: {(1 - result.cfg.fee / 100).toLocaleString("ko-KR", { maximumFractionDigits: 4 })}×판매가 &gt; 재진입 비용 {fmtMeso(eng.reentry)} + 에픽 구간 재설정 {eng.epicRolls.toFixed(1)}회의 기회비용(회당 {fmtMeso(eng.gShift)}) = <b style={{ color: C.text }}>{fmtMeso(eng.reentryEff)}</b> —
                     천장은 캐릭터 귀속이라 팔아도 이월되지만, 팔고 다시 올라오는 동안의 재설정은 다른 매물에 썼다면 벌었을 시간이라 비용으로 칩니다 ·
                     레전드리 판정: 계속 재설정 시 기대 수익(큐브값+기회비용 반영)과 비교(최적 정지) · 자동 제외 정책은 재설정 1회당 기대 이득이 최대가 되는 고정점으로 수렴시킨 결과예요
                     {eng.prime && <> · 프라임 열: 1줄 고정 상태에서 그 타겟을 <b style={{ color: C.text }}>보유 중일 때</b> 판매할지(프라임 1회 더 = {fmtMeso((parseFloat(primeCostEok) || 0) * 1e8)}+기회비용) · 확률은 프라임 1회당 그 구간이 최고가로 뜰 확률 · 선택 적용이라 보유 옵션은 절대 나빠지지 않아요</>}
@@ -1282,18 +704,8 @@ export default function App() {
                         </>
                       );
                     };
-                    const vw = typeof window !== "undefined" ? window.innerWidth : 800;
-                    const vh = typeof window !== "undefined" ? window.innerHeight : 600;
-                    const W = Math.min(520, vw - 16);
-                    const left = Math.max(8, Math.min(hoverPos.x + 16, vw - W - 8));
-                    const below = vh - hoverPos.y > 360;
                     return (
-                      <div style={{
-                        position: "fixed", zIndex: 50, width: W, left, pointerEvents: "none",
-                        ...(below ? { top: hoverPos.y + 16 } : { bottom: vh - hoverPos.y + 12 }),
-                        maxHeight: below ? vh - hoverPos.y - 24 : hoverPos.y - 20, overflow: "hidden",
-                        background: C.panel2, border: `1px solid ${C.border}`, borderRadius: 8, padding: 12,
-                        boxShadow: "0 8px 24px rgba(0,0,0,.5)" }}>
+                      <div id={`potential-detail-${hoverTid}`} className="potential-combo-detail">
                         <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>{row.base} — 구간 도달 조합 (기타 = 미추적 옵션 아무거나)</div>
                         <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                           <div style={{ flex: "1 1 220px" }}>
@@ -1312,12 +724,13 @@ export default function App() {
                       </div>
                     );
                   })()}
-                </div>
+                </CalculatorCard>
 
+                {result.simulationWarning && <p className="potential-note" role="status">기대 수익은 정확 해석 결과입니다. 리스크 시뮬레이션: {result.simulationWarning}</p>}
                 {/* 판매 구성 + 리스크 */}
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                  <div style={{ flex: "1 1 260px", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 }}>
-                    <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, letterSpacing: ".06em", marginBottom: 8 }}>
+                {result.mc && <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ flex: "1 1 260px", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 14, padding: "var(--ui-card-padding, 22px)" }}>
+                    <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em", marginBottom: 8 }}>
                       라운드 종료 구성 (시뮬레이션 {result.mc.rounds.toLocaleString()}라운드{sr ? (pm === "campaign" ? " · 천장 소모까지" : " · 현재 스택 시작") : ""})
                     </div>
                     {compEntries.map((e) => (
@@ -1331,8 +744,8 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                  <div style={{ flex: "1 1 220px", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14 }}>
-                    <div style={{ fontSize: 12, color: C.sub, fontWeight: 700, letterSpacing: ".06em", marginBottom: 8 }}>라운드 순익 분포 (리스크{sr ? (pm === "campaign" ? " · 천장 소모까지" : " · 현재 스택 시작") : ""})</div>
+                  <div style={{ flex: "1 1 220px", background: C.panel, border: `1px solid ${C.border}`, borderRadius: 14, padding: "var(--ui-card-padding, 22px)" }}>
+                    <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em", marginBottom: 8 }}>라운드 순익 분포 (리스크{sr ? (pm === "campaign" ? " · 천장 소모까지" : " · 현재 스택 시작") : ""})</div>
                     {[["하위 10% (불운)", result.mc.p10], ["중앙값", result.mc.p50], ["상위 10% (행운)", result.mc.p90]].map(([lb, v]) => (
                       <div key={lb} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "5px 0", borderBottom: `1px solid ${C.border}` }}>
                         <span style={{ color: C.sub }}>{lb}</span>
@@ -1343,18 +756,18 @@ export default function App() {
                       기댓값이 +여도 단기 편차가 큽니다. 회전 자금은 하위 10% 기준으로 준비하세요.
                     </div>
                   </div>
-                </div>
+                </div>}
                 <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.6 }}>
                   가정: 잠재능력 재설정(블랙큐브 동일 성능) · 에픽잠재부여주문서 비용 0 · 등업 롤은 새 등급 옵션으로 판정 ·
-                  쓸만한 스킬(최대 1줄)/피격 무적류(최대 1~2줄) 재계산 규칙 반영 · "동일 결과 재출현 방지"는 무시(오차 미미) ·
+                  쓸만한 스킬(최대 1줄)/피격 무적류(최대 1~2줄) 재계산 규칙 반영 · "동일 결과 재출현 방지"는 생략(근사 범위는 모델 문서 참고) ·
                   미라클데이는 등급업 확률만 ×2 (천장 적립·옵션 확률 불변)
                   {primeOn && <> · 프라임 큐브: 옵션 확률 블랙큐브 동일(2줄 20%·3줄 5% 상위 등급) · 조각 가치 미반영 · 구매 제한 미반영</>}
                 </div>
               </>
             )}
-          </div>
-        </div>
+          </section>
       </div>
-    </div>
+      <CalculatorFooter />
+    </main>
   );
 }

@@ -1,6 +1,6 @@
 import {
   ADDITIONAL_GRADES, ADDITIONAL_SLOTS, DEFAULT_ADDITIONAL_EFFICIENCY,
-  getAdditionalLines, scoreAdditionalOption, buildAdditionalDistribution,
+  getAdditionalCharacterSettings, getAdditionalLines, scoreAdditionalOption, buildAdditionalDistribution,
 } from './additional-data.mjs';
 import { solveAdditionalStrategy, evaluateAdditionalThresholds } from './additional-engine.mjs';
 
@@ -18,7 +18,7 @@ export const suggestedAdditionalAppraisalCost = level => Number.isInteger(level)
 
 export const DEFAULT_ADDITIONAL_SETTINGS = Object.freeze({
   slot: '모자', level: 200, grade: '에픽', currentOptions: ['없음', '없음', '없음'],
-  mainStat: 'STR', subStat: 'DEX', attackType: 'attack', characterLevel: 290,
+  ...getAdditionalCharacterSettings(), characterLevel: 290,
   efficiency: { ...DEFAULT_ADDITIONAL_EFFICIENCY },
   mesoPerPercent: 1e8, strangeCubePrice: 0, strangeAppraisalCost: suggestedAdditionalAppraisalCost(200), miracle: false,
   costs: resetAdditionalCosts(200),
@@ -26,6 +26,26 @@ export const DEFAULT_ADDITIONAL_SETTINGS = Object.freeze({
   stacks: { 에픽: 0, 유니크: 0 }, retainPaid: true,
   manual: { enabled: false, thresholds: { 에픽: 10, 유니크: 15, 레전드리: 20 }, method: 'reset' },
 });
+
+const record = value => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+
+/** Restore saved inputs without carrying obsolete character or utility settings. */
+export function normalizeAdditionalSettings(saved = {}) {
+  const source = record(saved);
+  const defaults = DEFAULT_ADDITIONAL_SETTINGS;
+  const merged = { ...defaults, ...source };
+  for (const key of ['efficiency', 'costs', 'upRates', 'pity', 'stacks']) {
+    merged[key] = { ...defaults[key], ...record(source[key]) };
+  }
+  merged.manual = { ...defaults.manual, ...record(source.manual),
+    thresholds: { ...defaults.manual.thresholds, ...record(source.manual?.thresholds) },
+  };
+  merged.currentOptions = Array.isArray(merged.currentOptions) ? [...merged.currentOptions] : merged.currentOptions;
+  Object.assign(merged, getAdditionalCharacterSettings(merged.mainStat));
+  merged.efficiency.itemDropPercent = 0;
+  merged.efficiency.mesoPercent = 0;
+  return merged;
+}
 
 function nonnegative(value, name, max = Infinity) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > max) {
@@ -40,13 +60,10 @@ export function validateAdditionalSettings(settings) {
   if (!Number.isInteger(settings.level) || settings.level < 120 || settings.level > 250) throw new Error('첨부 확률표가 있는 120~250레벨만 지원합니다.');
   const lines = getAdditionalLines({ method: 'reset', grade: settings.grade, slot: settings.slot, level: settings.level });
   if (!lines) throw new Error('이 부위·레벨은 첨부 확률표에 데이터가 없습니다. 다른 조합을 선택해 주세요.');
-  if (!['STR', 'DEX', 'INT', 'LUK'].includes(settings.mainStat)
-    || !['STR', 'DEX', 'INT', 'LUK'].includes(settings.subStat) || settings.mainStat === settings.subStat) {
-    throw new Error('주스탯과 부스탯을 서로 다르게 선택해 주세요.');
-  }
-  if (!['attack', 'magic'].includes(settings.attackType)) throw new Error('공격력 또는 마력을 선택해 주세요.');
+  if (!['STR', 'DEX', 'INT', 'LUK'].includes(settings.mainStat)) throw new Error('주스탯은 STR, DEX, INT, LUK 중에서 선택해 주세요.');
   if (!Number.isInteger(settings.characterLevel) || settings.characterLevel < 1 || settings.characterLevel > 300) throw new Error('캐릭터 레벨은 1~300의 정수로 입력해 주세요.');
   for (const key of Object.keys(DEFAULT_ADDITIONAL_EFFICIENCY)) {
+    if (key === 'itemDropPercent' || key === 'mesoPercent') continue;
     nonnegative(settings.efficiency?.[key], `환산 효율 ${key}`, 1e6);
   }
   nonnegative(settings.mesoPerPercent, '주스탯 1%당 지불 의향', 1e16);
@@ -146,7 +163,7 @@ export function calculateAdditionalStrategy(settings) {
     currentScore, strategies, recommendedId: recommended?.id ?? null, manual,
     warnings: [
       '첨부된 줄별 확률의 반올림 오차를 정규화해 조합합니다. 직전과 완전히 동일한 결과를 제외하는 규칙은 반영하지 않았습니다.',
-      '입력한 환산 효율이 없는 옵션의 가치는 0입니다. 쿨타임·드롭·메소·HP 등의 가치는 자동으로 추정하지 않습니다.',
+      '아이템 드롭률·메소 획득량은 환산 가치에서 제외합니다. 별도 효율이 없는 옵션과 HP 등의 가치는 0이며, 쿨타임은 입력한 효율만 반영합니다.',
       '큐브 수량과 총지출 상한이 없는 기대값 기준입니다. 표시한 기대 비용은 최대 지출액이 아닙니다.',
       ...(issue ? ['메소 전략은 재설정 규칙을 입력한 뒤 비교할 수 있습니다.'] : ['비용·등급업·천장 기본값은 첨부 나무위키 문서를 따르며 직접 수정할 수 있습니다. 미라클은 등급업 확률만 2배로 계산합니다.']),
       ...(settings.strangeCubePrice + settings.strangeAppraisalCost === 0 ? ['수에큐 총비용 0메소에서는 횟수 제한 없이 가능한 최고 환산값을 목표로 합니다. 기대 사용 개수와 실제 감정 비용을 함께 확인하세요.'] : []),

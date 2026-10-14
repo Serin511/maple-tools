@@ -4,4 +4,5 @@ await build({entryPoints:['ability-worker.mjs'],bundle:true,minify:true,format:'
 await build({entryPoints:['flame-worker.mjs'],bundle:true,minify:true,format:'iife',outfile:'flame-worker.js'});
 await build({entryPoints:['additional-worker.mjs'],bundle:true,minify:true,format:'iife',outfile:'additional-worker.js'});
 await build({entryPoints:['additional-trade-worker.mjs'],bundle:true,minify:true,format:'iife',outfile:'additional-trade-worker.js'});
+await build({entryPoints:['potential-worker.mjs'],bundle:true,minify:true,format:'iife',outfile:'potential-worker.js'});
 await import('./make_html.mjs');

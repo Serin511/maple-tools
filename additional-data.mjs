@@ -3,8 +3,10 @@ import data from './data/additional-probabilities.json' with { type: 'json' };
 /**
  * Uploaded Nexon option tables, losslessly deduplicated in data/*.json.
  * Selection: { method: 'reset'|'strange', grade: Korean grade, slot, level }.
- * Scoring: { mainStat, subStat, attackType: 'attack'|'magic', characterLevel,
+ * Scoring: { mainStat, characterLevel,
  *            efficiency: per-one-unit conversions, customOptionScores? }.
+ * The main stat fixes the one substat and attack/magic selection; legacy
+ * subStat/attackType fields cannot override the shared character mapping.
  * getAdditionalLines returns three arrays of {label, probability,
  * publishedPercent}, or null when the uploaded source has no matching table.
  * buildAdditionalDistribution combines the three published line marginals,
@@ -14,6 +16,12 @@ import data from './data/additional-probabilities.json' with { type: 'json' };
 export const ADDITIONAL_GRADES = Object.freeze(['에픽', '유니크', '레전드리']);
 export const ADDITIONAL_LEVELS = Object.freeze([140, 160, 200, 250]);
 export const ADDITIONAL_STATS = Object.freeze(['STR', 'DEX', 'INT', 'LUK']);
+export const ADDITIONAL_SUBSTATS = Object.freeze({ STR: 'DEX', DEX: 'STR', INT: 'LUK', LUK: 'DEX' });
+
+export function getAdditionalCharacterSettings(mainStat = 'STR') {
+  if (!ADDITIONAL_STATS.includes(mainStat)) throw new Error('주스탯은 STR, DEX, INT, LUK 중에서 선택해 주세요.');
+  return { mainStat, subStat: ADDITIONAL_SUBSTATS[mainStat], attackType: mainStat === 'INT' ? 'magic' : 'attack' };
+}
 // The requested calculator covers armor and accessories. Weapon/offhand
 // tables remain intact in the archival data, but are not selectable here.
 export const ADDITIONAL_SLOTS = Object.freeze([
@@ -31,7 +39,7 @@ export const DEFAULT_ADDITIONAL_EFFICIENCY = Object.freeze({
   damagePercent: 0,
   bossPercent: 0,
   ignoreDefensePercent: 0,
-  criticalDamagePercent: 0,
+  criticalDamagePercent: 4,
   criticalRatePercent: 0,
   itemDropPercent: 0,
   mesoPercent: 0,
@@ -39,9 +47,7 @@ export const DEFAULT_ADDITIONAL_EFFICIENCY = Object.freeze({
 });
 
 export const DEFAULT_ADDITIONAL_SCORE_SETTINGS = Object.freeze({
-  mainStat: 'STR',
-  subStat: 'DEX',
-  attackType: 'attack',
+  ...getAdditionalCharacterSettings(),
   characterLevel: 290,
   efficiency: DEFAULT_ADDITIONAL_EFFICIENCY,
 });
@@ -98,15 +104,12 @@ export function isAdditionalAvailable(selection) {
 
 export function validateAdditionalScoreSettings(settings = {}) {
   const config = { ...DEFAULT_ADDITIONAL_SCORE_SETTINGS, ...settings };
-  if (!ADDITIONAL_STATS.includes(config.mainStat) || !ADDITIONAL_STATS.includes(config.subStat)) {
-    throw new Error('주스탯과 부스탯은 STR, DEX, INT, LUK 중에서 선택해 주세요.');
-  }
-  if (config.mainStat === config.subStat) throw new Error('주스탯과 부스탯은 서로 다르게 선택해 주세요.');
-  if (!['attack', 'magic'].includes(config.attackType)) throw new Error('공격력 또는 마력을 선택해 주세요.');
+  getAdditionalCharacterSettings(config.mainStat);
   if (!Number.isInteger(config.characterLevel) || config.characterLevel < 1 || config.characterLevel > 300) {
     throw new Error('캐릭터 레벨은 1~300 사이의 정수로 입력해 주세요.');
   }
   for (const [key, value] of Object.entries(settings.efficiency ?? {})) {
+    if (key === 'itemDropPercent' || key === 'mesoPercent') continue;
     if (!(key in DEFAULT_ADDITIONAL_EFFICIENCY) || !Number.isFinite(value) || value < 0) {
       throw new Error('스탯 환산 효율은 0 이상의 유한한 숫자로 입력해 주세요.');
     }
@@ -121,7 +124,8 @@ function scoringConfig(settings) {
   return {
     ...DEFAULT_ADDITIONAL_SCORE_SETTINGS,
     ...settings,
-    efficiency: { ...DEFAULT_ADDITIONAL_EFFICIENCY, ...settings.efficiency },
+    ...getAdditionalCharacterSettings(settings.mainStat),
+    efficiency: { ...DEFAULT_ADDITIONAL_EFFICIENCY, ...settings.efficiency, itemDropPercent: 0, mesoPercent: 0 },
   };
 }
 
@@ -131,11 +135,12 @@ const PERCENT_OPTION_EFFICIENCY = Object.freeze({
   '몬스터 방어율 무시': 'ignoreDefensePercent',
   '크리티컬 데미지': 'criticalDamagePercent',
   '크리티컬 확률': 'criticalRatePercent',
-  '아이템 드롭률': 'itemDropPercent',
-  '메소 획득량': 'mesoPercent',
 });
 
 function evaluateOption(label, config) {
+  // Economic utility is outside the shared damage-stat model. Check this
+  // before explicit overrides so old saved coefficients cannot restore it.
+  if (/^(?:아이템 드롭률|메소 획득량) \+\d+(?:\.\d+)?%$/.test(label)) return 0;
   if (Object.hasOwn(config.customOptionScores ?? {}, label)) return config.customOptionScores[label];
   const efficiency = config.efficiency;
   let match = label.match(/^캐릭터 기준 (\d+)레벨 당 (STR|DEX|INT|LUK) \+(\d+)$/);

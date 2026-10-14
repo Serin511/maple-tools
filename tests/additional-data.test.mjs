@@ -6,9 +6,12 @@ import {
   ADDITIONAL_LEVELS,
   ADDITIONAL_SLOTS,
   ADDITIONAL_SOURCES,
+  ADDITIONAL_SUBSTATS,
+  DEFAULT_ADDITIONAL_EFFICIENCY,
   DEFAULT_ADDITIONAL_SCORE_SETTINGS,
   buildAdditionalDistribution,
   getAdditionalLines,
+  getAdditionalCharacterSettings,
   scoreAdditionalOption,
   scoreAdditionalOptions,
   validateAdditionalDataSettings,
@@ -83,19 +86,33 @@ test('every available line normalizes published rounding while preserving raw pe
   assert.equal(checked, 224);
 });
 
-test('stat conversions use a single chosen substat, attack type and user efficiencies', () => {
+test('stat conversions share merchant defaults and a fixed one-substat and attack mapping', () => {
+  assert.deepEqual(ADDITIONAL_SUBSTATS, { STR: 'DEX', DEX: 'STR', INT: 'LUK', LUK: 'DEX' });
+  assert.equal(DEFAULT_ADDITIONAL_EFFICIENCY.criticalDamagePercent, 4);
   for (const [label, value] of [
     ['STR +12', 1.2], ['DEX +12', .12], ['INT +12', 0], ['STR +6%', 6],
     ['DEX +6%', .6], ['INT +6%', 0], ['올스탯 +3%', 3.3], ['올스탯 +5', .55],
     ['공격력 +12', 3.6], ['마력 +12', 0], ['공격력 +12%', 0], ['최대 HP +360', 0],
-    ['크리티컬 데미지 +3%', 0], ['아이템 드롭률 +5%', 0], ['없음', 0],
+    ['크리티컬 데미지 +3%', 12], ['아이템 드롭률 +5%', 0], ['없음', 0],
   ]) close(scoreAdditionalOption(label), value);
-  const intSettings = { mainStat: 'INT', subStat: 'LUK', attackType: 'magic', efficiency: { mainFlat: .2, subFlat: .03, attackFlat: .5 } };
+  // Older saved selections cannot override the same fixed mapping used by trade.
+  const intSettings = { mainStat: 'INT', subStat: 'STR', attackType: 'attack', efficiency: { mainFlat: .2, subFlat: .03, attackFlat: .5 } };
   close(scoreAdditionalOption('INT +15', intSettings), 3);
   close(scoreAdditionalOption('LUK +15', intSettings), .45);
   close(scoreAdditionalOption('마력 +10', intSettings), 5);
   close(scoreAdditionalOption('공격력 +10', intSettings), 0);
   close(scoreAdditionalOption('올스탯 +5', intSettings), 1.15);
+  for (const [mainStat, subStat] of Object.entries(ADDITIONAL_SUBSTATS)) {
+    assert.deepEqual(getAdditionalCharacterSettings(mainStat), {
+      mainStat, subStat, attackType: mainStat === 'INT' ? 'magic' : 'attack',
+    });
+    const settings = { mainStat, subStat: mainStat, attackType: mainStat === 'INT' ? 'attack' : 'magic' };
+    close(scoreAdditionalOption(`${mainStat} +10`, settings), 1);
+    close(scoreAdditionalOption(`${subStat} +10`, settings), .1);
+    close(scoreAdditionalOption(`${subStat} +1%`, settings), .1);
+    close(scoreAdditionalOption('공격력 +10', settings), mainStat === 'INT' ? 0 : 3);
+    close(scoreAdditionalOption('마력 +10', settings), mainStat === 'INT' ? 3 : 0);
+  }
 });
 
 test('per-nine-level main and substats floor complete level groups', () => {
@@ -105,18 +122,42 @@ test('per-nine-level main and substats floor complete level groups', () => {
   close(scoreAdditionalOption('캐릭터 기준 9레벨 당 INT +2'), 0);
   close(scoreAdditionalOption('캐릭터 기준 9레벨 당 STR +2', { characterLevel: 287 }), 6.2);
   close(scoreAdditionalOption('캐릭터 기준 9레벨 당 STR +2', { characterLevel: 288 }), 6.4);
+  for (const characterLevel of [1, 8, 9, 17, 18, 287, 288, 290, 300]) {
+    const settings = { mainStat: 'INT', characterLevel };
+    close(scoreAdditionalOption('캐릭터 기준 9레벨 당 INT +2', settings), Math.floor(characterLevel / 9) * .2);
+    close(scoreAdditionalOption('캐릭터 기준 9레벨 당 LUK +2', settings), Math.floor(characterLevel / 9) * .02);
+    close(scoreAdditionalOption('캐릭터 기준 9레벨 당 STR +2', settings), 0);
+  }
 });
 
-test('special options receive value only from explicit coefficients or overrides', () => {
+test('special damage options honor coefficients and explicit zero while drop and meso always stay excluded', () => {
   const settings = { efficiency: { criticalDamagePercent: 4, itemDropPercent: .2, cooldownSecond: 5, attackPercent: 2, damagePercent: .3, ignoreDefensePercent: .4 } };
   close(scoreAdditionalOption('크리티컬 데미지 +3%', settings), 12);
-  close(scoreAdditionalOption('아이템 드롭률 +5%', settings), 1);
+  close(scoreAdditionalOption('아이템 드롭률 +5%', settings), 0);
   close(scoreAdditionalOption('스킬 재사용 대기시간 -1초', settings), 5);
   close(scoreAdditionalOption('공격력 +9%', settings), 18);
   close(scoreAdditionalOption('데미지 +10%', settings), 3);
   close(scoreAdditionalOption('몬스터 방어율 무시 +5%', settings), 2);
   close(scoreAdditionalOption('HP 회복 아이템 및 회복 스킬 효율 +30%', { customOptionScores: { 'HP 회복 아이템 및 회복 스킬 효율 +30%': 2.5 } }), 2.5);
   close(scoreAdditionalOption('STR +12', { customOptionScores: { 'STR +12': 0 } }), 0);
+  close(scoreAdditionalOption('크리티컬 데미지 +3%', { efficiency: { criticalDamagePercent: 0 } }), 0);
+  close(scoreAdditionalOption('크리티컬 확률 +5%', { efficiency: { criticalRatePercent: .3 } }), 1.5);
+  for (const label of ['아이템 드롭률 +5%', '메소 획득량 +5%']) {
+    close(scoreAdditionalOption(label, {
+      efficiency: { itemDropPercent: 100, mesoPercent: 100 }, customOptionScores: { [label]: 999 },
+    }), 0);
+  }
+});
+
+test('old drop and meso coefficients and overrides cannot change real Legendary ring distributions', () => {
+  const settings = { ...selection, slot: '반지', grade: '레전드리' };
+  const utilityLabels = ['아이템 드롭률 +5%', '메소 획득량 +5%'];
+  assert.ok(getAdditionalLines(settings).every(line => utilityLabels.every(label => line.some(row => row.label === label))));
+  const excluded = buildAdditionalDistribution({ ...settings,
+    efficiency: { itemDropPercent: 100, mesoPercent: 100 },
+    customOptionScores: Object.fromEntries(utilityLabels.map(label => [label, 1000])),
+  });
+  assert.deepEqual(excluded, buildAdditionalDistribution(settings));
 });
 
 test('three-line distribution retains zero outcomes and matches marginal analytic means', () => {
@@ -156,7 +197,7 @@ test('invalid selectors and efficiencies fail visibly instead of guessing', () =
   assert.doesNotThrow(() => validateAdditionalDataSettings({ slot: '장갑', level: 160 }));
   assert.throws(() => validateAdditionalDataSettings({ slot: '한벌옷', level: 250 }), /확률표/);
   assert.throws(() => buildAdditionalDistribution({ ...selection, grade: '레어' }), /확률표/);
-  assert.throws(() => validateAdditionalScoreSettings({ mainStat: 'STR', subStat: 'STR' }), /서로 다르게/);
+  assert.throws(() => validateAdditionalScoreSettings({ mainStat: 'HP' }), /주스탯/);
   assert.throws(() => validateAdditionalScoreSettings({ characterLevel: 301 }), /레벨/);
   assert.throws(() => scoreAdditionalOption('STR +12', { efficiency: { mainFlat: -1 } }), /효율/);
   assert.throws(() => scoreAdditionalOption('STR +12', { efficiency: { mainFlat: Infinity } }), /효율/);

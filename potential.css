@@ -1,0 +1,27 @@
+.potential-page { font-size: 14px; }
+.potential-grade-path { margin-bottom: 22px; }
+.potential-grade-steps { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.potential-layout { grid-template-columns: 350px minmax(0, 1fr); }
+.potential-settings, .potential-results { min-width: 0; }
+.potential-settings label { display: block; line-height: 1.8; }
+.potential-settings label > input, .potential-settings label > select { margin-top: 7px; }
+.potential-page input, .potential-page select { min-height: 38px; min-width: 0; font-variant-numeric: tabular-nums; }
+.potential-page button { font: inherit; min-height: 36px; }
+.potential-page button:disabled { opacity: .6; cursor: default; }
+.potential-page button:focus-visible, .potential-page input:focus-visible, .potential-page select:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 3px; }
+.potential-toggle { text-align: left; width: 100%; line-height: 1.6; }
+.potential-detail-toggle { display: inline-flex; align-items: center; gap: 8px; background: transparent; border: 0; padding: 4px; color: var(--ui-text); text-align: left; cursor: pointer; }
+.potential-detail-toggle span { color: var(--ui-accent); }
+.potential-combo-detail { background: var(--ui-input); border: 1px solid var(--ui-border); border-radius: 10px; padding: 16px; margin-top: 14px; }
+.potential-combo-detail > div { min-width: 0; overflow-wrap: anywhere; }
+.potential-table-scroll { max-width: 100%; overflow-x: auto; }
+.potential-judgements table { min-width: 520px; }
+.potential-note { border: 1px solid var(--ui-border); border-radius: 10px; padding: 14px; color: var(--ui-muted); font-size: 12px; line-height: 1.7; }
+@media (max-width: 950px) { .potential-layout { grid-template-columns: 310px minmax(0, 1fr); } }
+@media (max-width: 740px) {
+  .potential-layout { grid-template-columns: minmax(0, 1fr); }
+  .potential-results > div:first-child { flex-wrap: wrap; }
+  .potential-grade-path { margin-bottom: 25px; }
+  .potential-grade-steps { gap: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { .potential-page * { transition: none !important; } }

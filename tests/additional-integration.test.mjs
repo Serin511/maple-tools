@@ -2,13 +2,60 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_ADDITIONAL_SETTINGS, calculateAdditionalStrategy, previewAdditionalScore,
-  resetAdditionalCosts, suggestedAdditionalAppraisalCost, validateAdditionalSettings,
+  normalizeAdditionalSettings, resetAdditionalCosts, suggestedAdditionalAppraisalCost, validateAdditionalSettings,
 } from '../additional-calculator.mjs';
 import { buildAdditionalDistribution, getAdditionalLines } from '../additional-data.mjs';
+import { DEFAULT_ADDITIONAL_TRADE_SETTINGS, additionalTradeScore } from '../additional-trade-calculator.mjs';
 import { solveStopping } from '../flame-engine.mjs';
 
 const fresh = () => structuredClone(DEFAULT_ADDITIONAL_SETTINGS);
 const close = (a, b, tolerance = 1e-8) => assert.ok(Math.abs(a - b) <= tolerance * Math.max(1, Math.abs(a), Math.abs(b)), `${a} != ${b}`);
+
+test('strategy and trade use identical common efficiency defaults and character conversions', () => {
+  assert.deepEqual(DEFAULT_ADDITIONAL_SETTINGS.efficiency, DEFAULT_ADDITIONAL_TRADE_SETTINGS.efficiency);
+  const currentOptions = ['캐릭터 기준 9레벨 당 LUK +2', '마력 +12', '크리티컬 데미지 +3%'];
+  for (const mainStat of ['STR', 'DEX', 'INT', 'LUK']) {
+    const settings = { ...fresh(), mainStat, subStat: 'STR', attackType: 'attack', currentOptions };
+    const merchant = additionalTradeScore(currentOptions, { ...DEFAULT_ADDITIONAL_TRADE_SETTINGS, slot: '장갑', separateCrit: false });
+    close(previewAdditionalScore(settings), merchant.scores[mainStat]);
+  }
+});
+
+test('saved settings normalize obsolete character and utility choices while preserving explicit custom efficiencies', () => {
+  const saved = { mainStat: 'INT', subStat: 'DEX', attackType: 'attack',
+    efficiency: { mainFlat: .2, criticalDamagePercent: 0, itemDropPercent: 90, mesoPercent: 80 },
+    manual: { enabled: true, thresholds: { 에픽: 7 } },
+  };
+  const before = structuredClone(saved);
+  const restored = normalizeAdditionalSettings(saved);
+  assert.deepEqual(saved, before);
+  assert.equal(restored.subStat, 'LUK');
+  assert.equal(restored.attackType, 'magic');
+  assert.equal(restored.efficiency.mainFlat, .2);
+  assert.equal(restored.efficiency.criticalDamagePercent, 0);
+  assert.equal(restored.efficiency.itemDropPercent, 0);
+  assert.equal(restored.efficiency.mesoPercent, 0);
+  assert.deepEqual(restored.manual.thresholds, { 에픽: 7, 유니크: 15, 레전드리: 20 });
+  assert.equal(validateAdditionalSettings(restored), true);
+  const defaults = normalizeAdditionalSettings();
+  assert.equal(defaults.efficiency.criticalDamagePercent, 4);
+  defaults.currentOptions[0] = 'STR +12';
+  defaults.efficiency.mainFlat = 9;
+  assert.equal(DEFAULT_ADDITIONAL_SETTINGS.currentOptions[0], '없음');
+  assert.equal(DEFAULT_ADDITIONAL_SETTINGS.efficiency.mainFlat, .1);
+});
+
+test('legacy drop and meso values and overrides cannot affect selected options or strategy recommendations', () => {
+  const settings = fresh();
+  settings.slot = '반지'; settings.grade = '레전드리';
+  settings.currentOptions = ['아이템 드롭률 +5%', '메소 획득량 +5%', '없음'];
+  const expected = calculateAdditionalStrategy(settings);
+  settings.efficiency.itemDropPercent = 99;
+  settings.efficiency.mesoPercent = 88;
+  settings.customOptionScores = { '아이템 드롭률 +5%': 777, '메소 획득량 +5%': 666 };
+  assert.equal(previewAdditionalScore(settings), 0);
+  assert.deepEqual(calculateAdditionalStrategy(settings), expected);
+});
 
 test('PDF fee brackets and appraisal cost distinguish level120 and next-level boundaries', () => {
   assert.deepEqual(resetAdditionalCosts(159), { 에픽: 27300000, 유니크: 66300000, 레전드리: 78000000 });
@@ -92,7 +139,7 @@ test('zero willingness stops at the selected options and never spends on free cu
 });
 
 test('unavailable slot bands, mismatched current lines and malformed inputs fail instead of silently falling back', () => {
-  for (const patch of [{ slot: '무기' }, { slot: '벨트', level: 250 }, { level: 251 }, { subStat: 'STR' }, { strangeAppraisalCost: '' }, { currentOptions: ['STR +999%', '없음', '없음'] }]) {
+  for (const patch of [{ slot: '무기' }, { slot: '벨트', level: 250 }, { level: 251 }, { mainStat: 'HP' }, { strangeAppraisalCost: '' }, { currentOptions: ['STR +999%', '없음', '없음'] }]) {
     assert.throws(() => validateAdditionalSettings({ ...fresh(), ...patch }));
   }
   const settings = fresh(); settings.manual.enabled = true;

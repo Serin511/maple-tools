@@ -1,19 +1,19 @@
 import {
-  ADDITIONAL_GRADES, ADDITIONAL_LEVELS, ADDITIONAL_SLOTS, ADDITIONAL_STATS,
+  ADDITIONAL_GRADES, ADDITIONAL_LEVELS, ADDITIONAL_SLOTS, ADDITIONAL_STATS, ADDITIONAL_SUBSTATS,
   DEFAULT_ADDITIONAL_EFFICIENCY, getAdditionalLines, scoreAdditionalOption,
 } from './additional-data.mjs';
 import { resetAdditionalCosts } from './additional-calculator.mjs';
 import { solveAdditionalTrade } from './additional-trade-engine.mjs';
 
 const TRADE_GRADES = ADDITIONAL_GRADES;
-const SUBSTATS = Object.freeze({ STR: 'DEX', DEX: 'STR', INT: 'LUK', LUK: 'DEX' });
+const SUBSTATS = ADDITIONAL_SUBSTATS;
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const finite = (v, max = Infinity) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max;
 const atLeast = (value, threshold) => value >= threshold - Number.EPSILON * 16 * Math.max(1, Math.abs(value), Math.abs(threshold));
 
 export const DEFAULT_ADDITIONAL_TRADE_SETTINGS = Object.freeze({
   slot: '모자', level: 200, startGrade: '에픽', characterLevel: 290,
-  efficiency: { ...DEFAULT_ADDITIONAL_EFFICIENCY, criticalDamagePercent: 4 },
+  efficiency: { ...DEFAULT_ADDITIONAL_EFFICIENCY },
   itemPrice: 0, fee: 3, floorPrice: 0, miracle: false, autoSell: true,
   separateGrades: false, separateCrit: true,
   prices: { shared: [], 에픽: [], 유니크: [], 레전드리: [] },

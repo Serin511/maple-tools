@@ -5,4 +5,5 @@ ability-worker.js
 flame-worker.js
 additional-worker.js
 additional-trade-worker.js
+potential-worker.js
 dist/

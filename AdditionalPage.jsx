@@ -1,6 +1,7 @@
+import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, NumericField, CharacterEfficiencySettings } from './ui.jsx';
 import { useEffect, useRef, useState } from 'react';
-import { DEFAULT_ADDITIONAL_SETTINGS, validateAdditionalSettings, previewAdditionalScore, resetAdditionalCosts, suggestedAdditionalAppraisalCost, paidRulesIssue } from './additional-calculator.mjs';
-import { ADDITIONAL_SLOTS, ADDITIONAL_GRADES, ADDITIONAL_LEVELS, ADDITIONAL_SOURCES, getAdditionalLines } from './additional-data.mjs';
+import { DEFAULT_ADDITIONAL_SETTINGS, normalizeAdditionalSettings, validateAdditionalSettings, previewAdditionalScore, resetAdditionalCosts, suggestedAdditionalAppraisalCost, paidRulesIssue } from './additional-calculator.mjs';
+import { ADDITIONAL_SLOTS, ADDITIONAL_GRADES, ADDITIONAL_LEVELS, ADDITIONAL_SOURCES, getAdditionalLines, getAdditionalCharacterSettings } from './additional-data.mjs';
 import './flame.css';
 import './additional.css';
 
@@ -16,21 +17,7 @@ const meso = value => {
   if (magnitude >= 1e4) return `${number(value / 1e4)}만 메소`;
   return `${number(value, 0)} 메소`;
 };
-const stats = ['STR', 'DEX', 'INT', 'LUK'];
-const efficiencies = [
-  { key: 'mainFlat', label: '주스탯', amount: '10', scale: 10 },
-  { key: 'subFlat', label: '부스탯', amount: '10', scale: 10 },
-  { key: 'attackFlat', label: '공격력·마력', amount: '10', scale: 10 },
-  { key: 'subPercent', label: '부스탯', amount: '1%', scale: 1 },
-  { key: 'allPercent', label: '올스탯', amount: '1%', scale: 1 },
-];
-const optionalEfficiencies = [
-  { key: 'criticalDamagePercent', label: '크리티컬 데미지', amount: '1%', scale: 1 },
-  { key: 'criticalRatePercent', label: '크리티컬 확률', amount: '1%', scale: 1 },
-  { key: 'cooldownSecond', label: '스킬 쿨타임 감소', amount: '1초', scale: 1 },
-  { key: 'itemDropPercent', label: '아이템 드롭률', amount: '1%', scale: 1 },
-  { key: 'mesoPercent', label: '메소 획득량', amount: '1%', scale: 1 },
-];
+const optionalEfficiencies = [{ key: 'cooldownSecond', label: '스킬 쿨타임 감소', amount: '1초', scale: 1 }];
 const actionLabel = action => ({ stop: '현재 옵션 유지', keep: '현재 옵션 유지', strange: '수상한 에디셔널 큐브 사용', reset: '에디셔널 잠재능력 재설정', mixed: '현재 옵션에 따라 수단 선택' }[action] || '종료 기준 확인');
 const thresholdLabel = value => value === Infinity ? '등급업까지 계속' : value === null || value === undefined ? '—' : `${score(value)} 이상`;
 
@@ -39,24 +26,14 @@ function loadSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(SAVE_KEY));
     if (!saved || typeof saved !== 'object') return defaults;
-    const merged = { ...defaults, ...saved,
-      efficiency: { ...defaults.efficiency, ...saved.efficiency },
-      costs: { ...defaults.costs, ...saved.costs }, upRates: { ...defaults.upRates, ...saved.upRates },
-      pity: { ...defaults.pity, ...saved.pity }, stacks: { ...defaults.stacks, ...saved.stacks },
-      manual: { ...defaults.manual, ...saved.manual, thresholds: { ...defaults.manual.thresholds, ...saved.manual?.thresholds } },
-    };
+    const merged = normalizeAdditionalSettings(saved);
     validateAdditionalSettings(merged);
     return merged;
   } catch { return defaults; }
 }
 
-function NumericInput({ label, value, onChange, unit, scale = 1, min = 0, max, step = 'any', ...props }) {
-  return <div className="flame-input-unit">
-    <input aria-label={label} type="number" min={min} max={max} step={step} inputMode="decimal"
-      value={value === '' || value === undefined || value === null ? '' : Number((value * scale).toPrecision(12))}
-      onChange={event => onChange(event.target.value === '' ? '' : Number(event.target.value) / scale)} {...props} />
-    {unit && <span>{unit}</span>}
-  </div>;
+function NumericInput(props) {
+  return <NumericField className="flame-input-unit" {...props} />;
 }
 
 function Estimate({ strategy, compact = false }) {
@@ -197,17 +174,13 @@ export default function AdditionalPage() {
     </label>)}</div>;
   }
 
-  return <main className="flame-page additional-page">
-    <header className="flame-header">
-      <div><div className="flame-eyebrow">ADDITIONAL POTENTIAL <span>방어구 · 장신구</span></div>
-        <h1>에디셔널 <em>전략 계산기</em></h1>
-        <p>주스탯 1%에 얼마까지 쓸 수 있나요?<br />수에큐부터 등급별 재설정까지, 내 장비에서 멈출 기준을 비교합니다.</p>
-      </div>
-      <div className="additional-cube-mark" aria-hidden="true"><span>◇</span><i /></div>
-    </header>
-    <div className="flame-layout additional-layout">
-      <section className="flame-settings" aria-label="에디셔널 전략 계산 설정">
-        <div className="flame-card">
+  return <main className="flame-page additional-page calculator-page">
+    <CalculatorHeader className="flame-header" eyebrow="ADDITIONAL POTENTIAL" scope="방어구 · 장신구"
+      title={<>에디셔널 <em>전략 계산기</em></>}
+      description={<>주스탯 1%에 얼마까지 쓸 수 있나요?<br />수에큐부터 등급별 재설정까지, 내 장비에서 멈출 기준을 비교합니다.</>} />
+    <div className="flame-layout additional-layout calculator-layout">
+      <section className="flame-settings calculator-settings" aria-label="에디셔널 전략 계산 설정">
+        <CalculatorCard as="div" className="flame-card">
           <div className="flame-section-title"><h2>현재 장비와 에디셔널</h2><span className="flame-pill">시작점</span></div>
           <div className="additional-field-grid">
             <label className="additional-field">장비 부위<select aria-label="대상 아이템 부위" value={settings.slot} onChange={event => changeItem({ slot: event.target.value })}>{ADDITIONAL_SLOTS.map(slot => <option key={slot}>{slot}</option>)}</select></label>
@@ -225,23 +198,19 @@ export default function AdditionalPage() {
           {!lines && <p className="additional-warning" role="status">선택한 부위·등급·레벨의 확률표가 없습니다. 제공된 자료의 지원 범위를 확인해 주세요.</p>}
           <div className="flame-current-score"><span>현재 주스탯 환산 합계</span><b>{score(preview)}</b></div>
           <p className="flame-small-note">장비 조건을 바꾸면 현재 옵션은 초기화됩니다. 제공 자료의 120~250레벨 구간을 지원합니다.</p>
-        </div>
+        </CalculatorCard>
 
-        <div className="flame-card">
-          <div className="flame-section-title"><h2>캐릭터와 스탯 효율</h2><button className="flame-text-button" type="button" onClick={() => change({ efficiency: copy(DEFAULT_ADDITIONAL_SETTINGS.efficiency) })}>효율 기본값</button></div>
-          <div className="additional-field-grid">
-            <label className="additional-field">주스탯<select aria-label="캐릭터 주스탯" value={settings.mainStat} onChange={event => change({ mainStat: event.target.value, ...(event.target.value === settings.subStat ? { subStat: settings.mainStat } : {}) })}>{stats.map(stat => <option key={stat}>{stat}</option>)}</select></label>
-            <label className="additional-field">부스탯<select aria-label="캐릭터 부스탯" value={settings.subStat} onChange={event => change({ subStat: event.target.value })}>{stats.filter(stat => stat !== settings.mainStat).map(stat => <option key={stat}>{stat}</option>)}</select></label>
-            <label className="additional-field">유효 공격 스탯<select aria-label="공격력 또는 마력" value={settings.attackType} onChange={event => change({ attackType: event.target.value })}><option value="attack">공격력</option><option value="magic">마력</option></select></label>
-            <label className="additional-field">캐릭터 레벨<NumericInput label="캐릭터 레벨" value={settings.characterLevel} min={1} max={300} step="1" unit="레벨" onChange={value => change({ characterLevel: value })} /></label>
-          </div>
-          <p className="flame-small-note">9레벨당 스탯 옵션은 레벨 ÷ 9의 정수 부분을 적용합니다. 레벨 290이면 32회분입니다.</p>
-          {efficiencyFields(efficiencies)}
-          <details className="additional-inline-details"><summary>기타 옵션의 환산 효율</summary>{efficiencyFields(optionalEfficiencies)}<p className="flame-small-note">캐릭터의 크리티컬 확률 상한 등은 자동 반영하지 않습니다. 가치가 없는 옵션은 0으로 두세요.</p></details>
-          <p className="flame-small-note">오른쪽은 모두 주스탯 % 기준입니다. 올스탯 +10은 주스탯 +10과 부스탯 +10의 효율을 합산합니다. 별도 효율을 지정하지 않은 옵션의 가치는 0입니다.</p>
-        </div>
+        <CalculatorCard as="div" className="flame-card">
+          <CharacterEfficiencySettings settings={settings} onChange={change}
+            onMainStatChange={mainStat => change(getAdditionalCharacterSettings(mainStat))}>
+            <details className="additional-inline-details"><summary>쿨타임 감소의 환산 효율</summary>
+              {efficiencyFields(optionalEfficiencies)}
+              <p className="calculator-note">쿨타임 감소는 전략 계산기의 추가 환산 항목입니다. 가치가 없으면 0으로 두세요.</p>
+            </details>
+          </CharacterEfficiencySettings>
+        </CalculatorCard>
 
-        <div className="flame-card flame-price-card">
+        <CalculatorCard as="div" className="flame-card flame-price-card">
           <h2>주스탯 1%당 최대 비용</h2>
           <label className="flame-field-label">추가 주스탯 1%에 지불할 가치<NumericInput label="주스탯 1%당 지불할 최대 금액 (억 메소)" value={settings.mesoPerPercent} scale={1e-8} unit="억 메소 / 1%" onChange={value => change({ mesoPerPercent: value })} /></label>
           <p className="flame-small-note">총 지출 한도가 아닙니다. 예상 스탯 상승의 가치에서 비용을 뺀 기대값이 가장 큰 전략을 찾습니다.</p>
@@ -250,9 +219,9 @@ export default function AdditionalPage() {
           <div className="additional-cube-cost"><span>수에큐 1회 총 비용</span><b>{settings.strangeCubePrice === '' || settings.strangeAppraisalCost === '' ? '—' : meso(settings.strangeCubePrice + settings.strangeAppraisalCost)}</b></div>
           <p className="flame-small-note">큐브 가격이 0이어도 감정 비용이 매번 필요합니다. 기본 감정 비용은 레벨 제한² × 20메소(120레벨은 × 2.5)입니다. 120제에서 통찰력 90레벨 이상으로 무료 감정이 적용되면 0으로 수정하세요.</p>
           <label className="additional-check additional-miracle"><input type="checkbox" checked={settings.miracle} onChange={event => change({ miracle: event.target.checked })} /><span>미라클 타임<span>입력한 기본 등급업 확률의 2배 적용</span></span></label>
-        </div>
+        </CalculatorCard>
 
-        <details className="flame-card additional-rules">
+        <CalculatorCard as="details" className="flame-card additional-rules">
           <summary><span>재설정 규칙</span><span className="additional-rule-badge">{paidRulesReady ? '자동 입력 · 조정 가능' : '입력 필요'}</span></summary>
           <p className="flame-small-note">제공된 재설정 비용표와 등급업 규칙을 기본으로 적용합니다. 레벨 제한을 바꾸면 재설정·감정 비용을 자동 갱신합니다. 할인 등으로 실제 비용이 다르면 직접 수정하세요.</p>
           <h3>등급별 재설정 1회 비용</h3>
@@ -266,29 +235,29 @@ export default function AdditionalPage() {
           <p className="flame-small-note">입력한 횟수만큼 등급업에 실패하면 다음 재설정에서 확정 등급업합니다. 0이면 다음 재설정에서 즉시 확정 등급업합니다. 현재 스택은 해당 등급에서 이미 누적한 등급업 실패 횟수입니다.</p>
           <label className="additional-check"><input type="checkbox" checked={settings.retainPaid} onChange={event => change({ retainPaid: event.target.checked })} /><span>같은 등급에서는 재설정 전·후 선택 가능</span></label>
           <p className="flame-small-note">같은 등급에서 이전 옵션을 선택할 수 있는 규칙을 반영합니다. 등급업하면 새 등급의 결과를 적용하는 모델입니다.</p>
-        </details>
-        <button className="flame-calculate" type="button" onClick={calculate}>{busy ? '현재 설정으로 다시 계산' : '에디셔널 전략 비교'}<span aria-hidden="true">→</span></button>
-        <p className="flame-status" role="status" aria-live="polite">{progress}</p>
+        </CalculatorCard>
+        <CalculateButton className="flame-calculate" type="button" onClick={calculate}>{busy ? '현재 설정으로 다시 계산' : '에디셔널 전략 비교'}<span aria-hidden="true">→</span></CalculateButton>
+        <p className="flame-status calculator-status" role="status" aria-live="polite">{progress}</p>
         {error && <p className="flame-error" role="alert">{error}</p>}
       </section>
 
-      <section className="flame-results" aria-label="에디셔널 재설정 전략 비교 결과" aria-busy={busy}>
-        {!result && <div className="flame-card flame-empty">
+      <section className="flame-results calculator-results" aria-label="에디셔널 재설정 전략 비교 결과" aria-busy={busy}>
+        {!result && <CalculatorCard as="div" className="flame-card flame-empty">
           <div className="flame-empty-icon" aria-hidden="true">◇</div><h2>{busy ? '등급별로 가장 유리한 종료 기준을 찾고 있습니다' : '내 에디셔널의 다음 한 번을 결정하세요'}</h2>
           <p>지금 멈출지, 에픽에서 타협할지, 더 높은 등급까지 갈지.<br />현재 옵션과 스탯 가치를 함께 반영해 비교합니다.</p>
           {busy && <div className="flame-progress" />}
           <div className="flame-empty-steps"><span>현재 옵션</span><i>＋</i><span>등급업 확률</span><i>＋</i><span>상승분의 가치</span></div>
-        </div>}
+        </CalculatorCard>}
 
         {result && <>
           <p className="additional-model-note">줄별 공개 확률을 결합한 근사 계산입니다. 자세한 가정은 아래 계산 방법에서 확인할 수 있습니다.</p>
-          <section className="flame-card additional-strategies"><div className="flame-section-title"><h2>전략별 비교</h2><span>예상 순가치가 높은 전략 추천</span></div>
+          <CalculatorCard as="section" className="flame-card additional-strategies"><div className="flame-section-title"><h2>전략별 비교</h2><span>예상 순가치가 높은 전략 추천</span></div>
             <p className="flame-muted">예상 순가치 = 예상 상승 주스탯 % × 1%당 가치 − 예상 추가 지출</p>
             <div className="additional-strategy-list">{result.strategies?.map(strategy => <button type="button" key={strategy.id} disabled={!strategy.available} aria-pressed={selected?.id === strategy.id} onClick={() => setSelectedId(strategy.id)}>
               <div><span className="additional-strategy-name">{strategy.label}{strategy.id === result.recommendedId && <i>추천</i>}</span><span className="additional-strategy-meta">{strategy.available ? `${actionLabel(strategy.action)} · 예상 비용 ${meso(strategy.expectedCost)}` : strategy.reason || '현재 조건에서 사용할 수 없습니다.'}</span></div>
               <span className="additional-strategy-value">{strategy.available ? meso(strategy.expectedNetValue) : '계산 제외'}{strategy.available && <small>예상 순가치</small>}</span>
             </button>)}</div>
-          </section>
+          </CalculatorCard>
 
           {selected?.available && <>
             <div className={`flame-card flame-recommendation ${isStop ? 'flame-keep' : ''}`}>
@@ -304,20 +273,20 @@ export default function AdditionalPage() {
                 </tr>)}</tbody></table></div><p className="flame-small-note">이 구간은 실제로 나올 수 있는 옵션 점수를 묶은 것입니다. 누적 실패 스택이 바뀌면 행동 기준도 바뀔 수 있습니다.</p>
               </details>}
             </div>
-            <section className="flame-card"><div className="flame-section-title"><h2>여기서부터 예상되는 결과</h2><span>평균값 · 보장 수치 아님</span></div>
+            <CalculatorCard as="section" className="flame-card"><div className="flame-section-title"><h2>여기서부터 예상되는 결과</h2><span>평균값 · 보장 수치 아님</span></div>
               <Estimate strategy={selected} />
               <div className="additional-attempt-split"><span>수상한 에디셔널 큐브 <b>{number(selected.expectedStrangeAttempts)}회</b></span><span>잠재능력 재설정 <b>{number(selected.expectedResetAttempts)}회</b></span></div>
               <GradeDistribution grades={selected.finalGrades} />
               <p className="flame-small-note">예상 지출은 최대 지출이 아닙니다. 큐브 공급과 사용 횟수에 제한을 두지 않습니다. 무료 큐브도 감정 비용이 필요하며, 목표까지 많은 횟수가 필요할 수 있습니다.</p>
-            </section>
-            {!!selected.examples?.length && <section className="flame-card"><div className="flame-section-title"><h2>종료 기준을 만족하는 옵션 예시</h2><span>세 줄의 환산 합계</span></div>
+            </CalculatorCard>
+            {!!selected.examples?.length && <CalculatorCard as="section" className="flame-card"><div className="flame-section-title"><h2>종료 기준을 만족하는 옵션 예시</h2><span>세 줄의 환산 합계</span></div>
               <div className="additional-examples">{selected.examples.slice(0, 6).map((example, index) => <div key={index}><ol>{example.options.map((option, line) => <li key={line}>{option}</li>)}</ol><b>{score(example.score)}</b></div>)}</div>
               <p className="flame-small-note">확률 분포에서 선택한 대표 조합입니다. 표시되지 않은 조합도 세 줄의 환산 합계로 판단하세요.</p>
-            </section>}
+            </CalculatorCard>}
           </>}
         </>}
 
-        <section className="flame-card additional-manual"><div className="flame-section-title"><h2>내가 정한 x%급 전략</h2><span>직접 정한 종료 기준 비교</span></div>
+        <CalculatorCard as="section" className="flame-card additional-manual"><div className="flame-section-title"><h2>내가 정한 x%급 전략</h2><span>직접 정한 종료 기준 비교</span></div>
           <p className="flame-muted">에픽에서 적당히 멈추거나, 유니크·레전드리에서는 더 높은 옵션을 노리는 기준을 직접 비교해 보세요.</p>
           <label className="additional-check"><input type="checkbox" checked={settings.manual.enabled} onChange={event => changeNested('manual', 'enabled', event.target.checked)} /><span>직접 정한 종료 기준도 함께 계산</span></label>
           {settings.manual.enabled && <div className="additional-manual-controls">
@@ -325,12 +294,12 @@ export default function AdditionalPage() {
             <label className="additional-field">모든 등급에 같은 기준 적용<NumericInput label="모든 등급의 동일 종료 기준" value={new Set(Object.values(settings.manual.thresholds)).size === 1 ? settings.manual.thresholds['에픽'] : ''} placeholder="일괄 입력" unit="% 이상" onChange={value => changeNested('manual', 'thresholds', Object.fromEntries(ADDITIONAL_GRADES.map(grade => [grade, value])))} /></label>
             <div className="additional-manual-grades">{ADDITIONAL_GRADES.map(grade => <label className={`additional-field additional-grade-${grade}`} key={grade}>{grade}<NumericInput label={`${grade} 직접 정한 종료 기준`} value={settings.manual.thresholds[grade]} unit="% 이상" onChange={value => changeNested('manual', 'thresholds', { ...settings.manual.thresholds, [grade]: value })} /></label>)}</div>
             <p className="flame-small-note">입력 후 ‘에디셔널 전략 비교’를 눌러 계산하세요. 수에큐는 에픽 종료 기준만 적용합니다. 수에큐와 메소 중 매번 유리한 수단을 고르는 전략은 위의 최적 선택 결과에서 확인할 수 있습니다.</p>
-            <button className="flame-calculate additional-manual-calculate" type="button" onClick={calculate}>직접 정한 전략 계산<span aria-hidden="true">→</span></button>
+            <CalculateButton className="flame-calculate additional-manual-calculate" type="button" onClick={calculate}>직접 정한 전략 계산<span aria-hidden="true">→</span></CalculateButton>
             {result?.manual && <div className="additional-manual-result">{result.manual.available ? <><h3>직접 정한 전략의 예상 결과</h3><Estimate strategy={result.manual} compact /><p className="additional-manual-value">예상 순가치 <b>{meso(result.manual.expectedNetValue)}</b></p><GradeDistribution grades={result.manual.finalGrades} /></> : <p className="additional-warning">{result.manual.reason || '이 조건으로는 설정한 종료 기준에 도달할 수 없습니다.'}</p>}</div>}
           </div>}
-        </section>
+        </CalculatorCard>
 
-        <details className="flame-card flame-assumptions additional-assumptions"><summary>계산 방법·지원 범위와 확률 출처</summary>
+        <CalculatorCard as="details" className="flame-card flame-assumptions additional-assumptions"><summary>계산 방법·지원 범위와 확률 출처</summary>
           <ul>
             {result?.warnings?.map((warning, index) => <li key={index}>{warning}</li>)}
             <li>첨부된 수상한 에디셔널 큐브 및 에디셔널 잠재능력 재설정 확률표의 방어구·장신구를 사용합니다. 무기·보조무기·엠블렘은 제외합니다. 수에큐는 에픽 등급에서만 비교합니다.</li>
@@ -341,9 +310,9 @@ export default function AdditionalPage() {
             <li>스탯 상한, 직업별 특수 효과, 지정하지 않은 유틸리티 옵션의 가치는 자동 반영하지 않습니다. 실제 지출은 기대값보다 커질 수 있으며 총 예산 제한은 지원하지 않습니다.</li>
           </ul>
           <div className="flame-source-links">{ADDITIONAL_SOURCES.map(source => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>)}<a href="https://namu.wiki/w/%EC%9E%A0%EC%9E%AC%EB%8A%A5%EB%A0%A5" target="_blank" rel="noreferrer">비용·등급업 참고 문서 ↗</a></div>
-        </details>
+        </CalculatorCard>
       </section>
     </div>
-    <footer className="flame-footer">메이플 계산기 · 입력값은 이 브라우저에 자동 저장됩니다.</footer>
+    <CalculatorFooter className="flame-footer">메이플 계산기 · 입력값은 이 브라우저에 자동 저장됩니다.</CalculatorFooter>
   </main>;
 }
