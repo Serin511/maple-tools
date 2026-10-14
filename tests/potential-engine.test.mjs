@@ -228,6 +228,73 @@ test('rare Prime-entry alternatives use an exact continuation value instead of t
   close(eng.legPrimeRolls, 0);
 });
 
+test('automatic Prime selection maximizes complete profit per reset over every fixed line and the baseline', () => {
+  const cases = [
+    { part: 'heart', level: 200, targetsL: [stat('str36', 36, 1e6)], expected: 'STR' },
+    { part: 'heart', level: 250, targetsL: [stat('str39', 39, 1e6), { id: 'hp39', kind: 'hp', min: 39, price: 2e6 }], expected: 'HP' },
+    { part: 'hat', level: 200, targetsL: [{ id: 'cd4', kind: 'hat', cd: 4, statMin: 0, price: 1e6 }], expected: 'CD2' },
+    { part: 'glove', level: 250, targetsL: [{ id: 'crit24', kind: 'glove', crit: 24, statMin: 0, price: 1e6 }], expected: 'CRIT' },
+  ];
+  for (const { expected, ...patch } of cases) for (const cost of [10, 1e12]) {
+    const cfg = config({ ...patch, autoExclude: true, floorPrice: 0, prime: { on: true, cost, fixedKey: 'auto' } });
+    const before = structuredClone(cfg), optimized = solveEngine(cfg);
+    const baseline = solveEngine({ ...cfg, prime: { on: false } });
+    const baselineMetric = baseline.steady.profit / baseline.steady.resets;
+    const candidates = primeAtomList(cfg.part, cfg.level).map(atom => {
+      const manual = solveEngine({ ...cfg, prime: { ...cfg.prime, fixedKey: atom.key } });
+      return { atom, manual, metric: manual.steady.profit / manual.steady.resets };
+    });
+    const best = candidates.reduce((a, b) => b.metric > a.metric + 1e-6 ? b : a);
+    close(optimized.steady.profit / optimized.steady.resets, Math.max(baselineMetric, ...candidates.map(c => c.metric)));
+    assert.equal(optimized.primeOptimization.candidates.length, candidates.length);
+    for (const { atom, manual, metric } of candidates) {
+      const reported = optimized.primeOptimization.candidates.find(c => c.fixedKey === atom.key);
+      close(reported.profitPerReset, metric);
+      close(reported.profit, manual.steady.profit);
+      close(reported.resets, manual.steady.resets);
+      close(reported.primeResets, manual.legPrimeRolls);
+    }
+    close(optimized.primeOptimization.baselineProfitPerReset, baselineMetric);
+    assert.equal(optimized.primeOptimization.bestFixedKey, best.atom.key);
+    if (cost === 10) {
+      assert.equal(optimized.primeOptimization.selectedFixedKey, expected);
+      assert.equal(optimized.resolvedPrime.fixedKey, expected);
+      assert.equal(optimized.resolvedPrime.on, true);
+      assert.ok(optimized.legPrimeRolls > 0);
+      assert.ok(optimized.primeOptimization.improvementPerReset > 0);
+    } else {
+      assert.equal(optimized.resolvedPrime.on, false);
+      assert.equal(optimized.primeOptimization.selectedFixedKey, null);
+      assert.equal(optimized.primeOptimization.reason, 'no-benefit');
+      assert.deepEqual(optimized.steady, baseline.steady);
+    }
+    assert.deepEqual(cfg, before);
+  }
+});
+
+test('automatic Prime reports no selection for absent or unreachable sales targets', () => {
+  for (const targetsL of [[], [stat('unreachable', 100, 1e6)]]) {
+    const cfg = config({ targetsL, prime: { on: true, cost: 10, fixedKey: 'auto' } });
+    const automatic = solveEngine(cfg), baseline = solveEngine({ ...cfg, prime: { on: false } });
+    assert.deepEqual(automatic.steady, baseline.steady);
+    assert.equal(automatic.primeOptimization.reason, 'no-targets');
+    assert.equal(automatic.primeOptimization.selectedFixedKey, null);
+    assert.equal(automatic.primeOptimization.bestFixedKey, null);
+    assert.equal(automatic.resolvedPrime.on, false);
+    assert.equal(automatic.resolvedPrime.fixedKey, null);
+  }
+});
+
+test('single-build automatic Prime compares the same opportunity-cost policies as manual options', () => {
+  const cfg = config({ targetsL: [stat('str36', 36, 1e6)], floorPrice: 0, autoExclude: true,
+    prime: { on: true, cost: 10, fixedKey: 'auto' } });
+  const g = 15, actual = buildEngine(cfg, g);
+  const policies = [buildEngine({ ...cfg, prime: { on: false } }, g),
+    ...primeAtomList(cfg.part, cfg.level).map(atom => buildEngine({ ...cfg, prime: { ...cfg.prime, fixedKey: atom.key } }, g))];
+  close(actual.steady.profit / actual.steady.resets, Math.max(...policies.map(engine => engine.steady.profit / engine.steady.resets)));
+  assert.equal(actual.gShift, g);
+});
+
 test('geometric wait sampling honors exact boundaries and avoids a loop for rare probabilities', () => {
   assert.equal(sampleGeometric(1, () => 0), 1);
   assert.equal(sampleGeometric(.5, () => 0), 1);

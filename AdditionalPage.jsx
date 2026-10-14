@@ -1,7 +1,8 @@
-import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, NumericField, CharacterEfficiencySettings, TradeResetCostSettings, ToggleField, PityStackFields } from './ui.jsx';
+import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, NumericField, CharacterEfficiencySettings, TradeResetCostSettings, ToggleField, PityStackFields, PrimeCubeSettings, PrimeOptimizationSummary } from './ui.jsx';
 import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_ADDITIONAL_SETTINGS, normalizeAdditionalSettings, validateAdditionalSettings, previewAdditionalScore, resetAdditionalCosts, suggestedAdditionalAppraisalCost } from './additional-calculator.mjs';
 import { ADDITIONAL_SLOTS, ADDITIONAL_GRADES, ADDITIONAL_LEVELS, ADDITIONAL_SOURCES, getAdditionalLines, getAdditionalCharacterSettings } from './additional-data.mjs';
+import { listAdditionalPrimeOptions, normalizeAdditionalPrime } from './additional-prime.mjs';
 import './flame.css';
 import './additional.css';
 
@@ -18,7 +19,7 @@ const meso = value => {
   return `${number(value, 0)} 메소`;
 };
 const optionalEfficiencies = [{ key: 'cooldownSecond', label: '스킬 쿨타임 감소', amount: '1초', scale: 1 }];
-const actionLabel = action => ({ stop: '현재 옵션 유지', keep: '현재 옵션 유지', strange: '수상한 에디셔널 큐브 사용', reset: '에디셔널 잠재능력 재설정', mixed: '현재 옵션에 따라 수단 선택' }[action] || '종료 기준 확인');
+const actionLabel = action => ({ stop: '현재 옵션 유지', keep: '현재 옵션 유지', strange: '수상한 에디셔널 큐브 사용', reset: '에디셔널 잠재능력 재설정', prime: '프라임 에디셔널 큐브 사용', mixed: '현재 옵션에 따라 수단 선택' }[action] || '종료 기준 확인');
 const thresholdLabel = value => value === Infinity ? '등급업까지 계속' : value === null || value === undefined ? '—' : `${score(value)} 이상`;
 
 function loadSettings() {
@@ -47,6 +48,15 @@ function Estimate({ strategy, compact = false }) {
   </div>;
 }
 
+function AttemptSplit({ strategy, primeOn }) {
+  return <>
+    <div className="additional-attempt-split"><span>수상한 에디셔널 큐브 <b>{number(strategy.expectedStrangeAttempts)}회</b></span><span>잠재능력 재설정 <b>{number(strategy.expectedResetAttempts)}회</b></span>
+      {primeOn && <span>프라임 에디셔널 큐브 <b>{number(strategy.expectedPrimeAttempts || 0)}회</b> · {meso(strategy.expectedPrimeCost || 0)}</span>}
+    </div>
+    {primeOn && strategy.fixedLabel && strategy.expectedPrimeAttempts > 0 && <p className="flame-small-note">이 전략의 고정 옵션: <b>{strategy.fixedLabel}</b></p>}
+  </>;
+}
+
 function Thresholds({ strategy, settings }) {
   const rows = strategy.allThresholds || strategy.thresholds || [];
   const visibleRows = ADDITIONAL_GRADES.map(grade => {
@@ -54,15 +64,18 @@ function Thresholds({ strategy, settings }) {
     return gradeRows.find(row => row.stack === (settings.stacks[grade] || 0)) || gradeRows.find(row => row.stack === 0) || gradeRows[0];
   }).filter(Boolean);
   if (!visibleRows.length) return null;
+  const firstLineDependent = rows.some(row => row.firstLineDependent);
+  const endingCriterion = row => row.firstLineDependent ? '첫 줄에 따라 달라짐' : thresholdLabel(row.targetScore ?? row.threshold);
   return <div className="additional-thresholds">
     <div className="flame-section-title"><h3>등급별 종료 기준</h3><span>현재 입력한 등급업 스택 기준</span></div>
     <div className="additional-grade-thresholds">{visibleRows.map(row => <div key={row.grade} className={`additional-grade-${row.grade}`}>
-      <span>{row.grade}</span><b>{thresholdLabel(row.targetScore ?? row.threshold)}</b>
-      <small>{row.action === 'mixed' ? '현재 옵션에 따라 수단 선택' : row.action === 'strange' ? '수상한 에디셔널 큐브' : row.action === 'stop' ? '종료' : '잠재능력 재설정'}{row.stack > 0 ? ` · ${row.stack}스택` : ''}</small>
+      <span>{row.grade}</span><b>{endingCriterion(row)}</b>
+      <small>{row.action === 'mixed' ? '현재 옵션에 따라 수단 선택' : row.action === 'strange' ? '수상한 에디셔널 큐브' : row.action === 'prime' ? '프라임 에디셔널 큐브' : row.action === 'stop' ? '종료' : '잠재능력 재설정'}{row.stack > 0 ? ` · ${row.stack}스택` : ''}</small>
     </div>)}</div>
+    {firstLineDependent && <p className="flame-small-note">프라임을 사용할 수 있는 첫 줄인지에 따라 종료 기준이 달라집니다. 아래 점수별 행동에서 첫 줄 조건을 함께 확인하세요.</p>}
     {rows.length > visibleRows.length && <details className="additional-stack-details"><summary>등급업 스택에 따른 기준 보기</summary>
       <div className="flame-table-scroll additional-stack-table"><table><thead><tr><th>등급</th><th>스택</th><th>종료 기준</th><th>기준 미만일 때</th></tr></thead>
-        <tbody>{rows.map((row, index) => <tr key={`${row.grade}-${row.stack}-${index}`}><td>{row.grade}</td><td>{row.stack ?? 0}</td><td>{thresholdLabel(row.targetScore ?? row.threshold)}</td><td>{row.action === 'mixed' ? '옵션에 따라 수단 선택' : row.action === 'strange' ? '수에큐 사용' : row.action === 'stop' ? '유지' : '재설정'}</td></tr>)}</tbody>
+        <tbody>{rows.map((row, index) => <tr key={`${row.grade}-${row.stack}-${index}`}><td>{row.grade}</td><td>{row.stack ?? 0}</td><td>{endingCriterion(row)}</td><td>{row.action === 'mixed' ? '옵션에 따라 수단 선택' : row.action === 'strange' ? '수에큐 사용' : row.action === 'prime' ? '프라임 사용' : row.action === 'stop' ? '유지' : '재설정'}</td></tr>)}</tbody>
       </table></div>
     </details>}
   </div>;
@@ -109,7 +122,8 @@ export default function AdditionalPage() {
     setProgress('입력값이 바뀌었습니다. 전략을 다시 계산해 주세요.');
   }
   const changeNested = (key, name, value) => change({ [key]: { ...settings[key], [name]: value } });
-  const changeItem = patch => change({ ...patch, ...(Object.hasOwn(patch, 'level') ? { costs: resetAdditionalCosts(patch.level), strangeAppraisalCost: suggestedAdditionalAppraisalCost(patch.level) } : {}), currentOptions: ['없음', '없음', '없음'] });
+  const changeItem = patch => change({ ...patch, ...(Object.hasOwn(patch, 'level') ? { costs: resetAdditionalCosts(patch.level), strangeAppraisalCost: suggestedAdditionalAppraisalCost(patch.level) } : {}),
+    prime: normalizeAdditionalPrime({ ...settings, ...patch }), currentOptions: ['없음', '없음', '없음'] });
 
   function calculate() {
     try {
@@ -233,6 +247,11 @@ export default function AdditionalPage() {
             label="같은 등급에서는 재설정 전·후 선택 가능"
             description="같은 등급에서는 이전 옵션을 선택할 수 있습니다. 등급업하면 새 등급의 결과를 적용합니다." />
         </CalculatorCard>
+        <PrimeCubeSettings prime={settings.prime} onChange={prime => change({ prime })}
+          label="프라임 에디셔널 큐브 모드 (레전드리 1줄 고정)"
+          priceLabel="프라임 에디셔널 큐브 가격 (억 메소 / 회)"
+          options={listAdditionalPrimeOptions(settings)} optimization={selected?.primeOptimization ?? result?.primeOptimization}
+          description="레전드리에서 고정할 첫 줄이 나오면 프라임 에디셔널 큐브를 사용할 수 있습니다. 나머지 두 줄을 재설정하고, 이전·신규 옵션 중 더 유리한 결과를 선택합니다." />
         <TradeResetCostSettings costs={ADDITIONAL_GRADES.map((grade, index) => ({ key: grade, label: grade,
           color: ['#b07df7', '#f2c744', '#79e07d'][index], value: settings.costs[grade],
           ariaLabel: `${grade} 에디셔널 재설정 비용`, onChange: value => changeNested('costs', grade, value),
@@ -264,25 +283,29 @@ export default function AdditionalPage() {
             <div className={`flame-card flame-recommendation ${isStop ? 'flame-keep' : ''}`}>
               <div className="flame-section-title"><span className="flame-pill">{selected.id === result.recommendedId ? '추천 전략' : '선택한 전략'}</span><span>{selected.label}</span></div>
               {isStop ? <div className="flame-no-budget">입력한 주스탯 가치에서는<br /><strong>현재 옵션을 유지하세요</strong></div>
+                : currentThreshold?.firstLineDependent ? <div className="flame-no-budget"><strong>첫 줄과 환산값으로 판단</strong><p>첫 줄 조건에 따라 종료 기준이 달라집니다.</p></div>
                 : Number.isFinite(target) ? <div className="flame-threshold"><strong>{number(target, 4)}<small>%</small></strong><span>현재 등급에서 종료 기준</span></div>
                 : <div className="flame-no-budget"><strong>{target === Infinity ? '다음 등급까지 재설정' : actionLabel(selected.action)}</strong></div>}
               <div className="flame-action"><span className="flame-action-symbol" aria-hidden="true">{isStop ? '✓' : '↻'}</span><div><span>현재 {settings.grade} · 환산 {score(result.currentScore)}</span><h2>{actionLabel(selected.action)}</h2><p>{isStop ? '추가 재설정으로 얻을 상승분의 기대 가치가 비용보다 크지 않습니다.' : '각 결과의 세 줄 환산 합계를 확인하세요. 등급이 오르거나 스택이 쌓이면 해당 상태의 종료 기준을 적용합니다.'}</p></div></div>
               <Thresholds strategy={selected} settings={settings} />
               {!!currentThreshold?.actionRanges?.length && <details className="additional-stack-details"><summary>현재 등급·스택의 점수별 행동 보기</summary>
-                <div className="flame-table-scroll"><table><thead><tr><th>획득 가능한 환산값 범위</th><th>다음 행동</th></tr></thead><tbody>{currentThreshold.actionRanges.map((range, index) => <tr key={index}>
+                <div className="flame-table-scroll"><table><thead><tr>{currentThreshold.firstLineDependent && <th>첫 줄 조건</th>}<th>획득 가능한 환산값 범위</th><th>다음 행동</th></tr></thead><tbody>{currentThreshold.actionRanges.map((range, index) => <tr key={index}>
+                  {currentThreshold.firstLineDependent && <td>{range.firstKey || '다른 첫 줄'}</td>}
                   <td>{score(range.minScore)}{range.maxScore !== range.minScore ? ` ~ ${score(range.maxScore)}` : ''}</td><td>{actionLabel(range.action)}</td>
-                </tr>)}</tbody></table></div><p className="flame-small-note">이 구간은 실제로 나올 수 있는 옵션 점수를 묶은 것입니다. 누적 실패 스택이 바뀌면 행동 기준도 바뀔 수 있습니다.</p>
+                </tr>)}</tbody></table></div><p className="flame-small-note">이 구간은 실제로 나올 수 있는 옵션 점수를 묶은 것입니다. {currentThreshold.firstLineDependent && '첫 줄 조건이 다르면 같은 환산값에서도 행동이 달라집니다. '}누적 실패 스택이 바뀌면 행동 기준도 바뀔 수 있습니다.</p>
               </details>}
             </div>
             <CalculatorCard as="section" className="flame-card"><div className="flame-section-title"><h2>여기서부터 예상되는 결과</h2><span>평균값 · 보장 수치 아님</span></div>
               <Estimate strategy={selected} />
-              <div className="additional-attempt-split"><span>수상한 에디셔널 큐브 <b>{number(selected.expectedStrangeAttempts)}회</b></span><span>잠재능력 재설정 <b>{number(selected.expectedResetAttempts)}회</b></span></div>
+              <AttemptSplit strategy={selected} primeOn={settings.prime.on} />
               <GradeDistribution grades={selected.finalGrades} />
               <p className="flame-small-note">예상 지출은 최대 지출이 아닙니다. 큐브 공급과 사용 횟수에 제한을 두지 않습니다. 무료 큐브도 감정 비용이 필요하며, 목표까지 많은 횟수가 필요할 수 있습니다.</p>
             </CalculatorCard>
             {!!selected.examples?.length && <CalculatorCard as="section" className="flame-card"><div className="flame-section-title"><h2>종료 기준을 만족하는 옵션 예시</h2><span>세 줄의 환산 합계</span></div>
               <div className="additional-examples">{selected.examples.slice(0, 6).map((example, index) => <div key={index}><ol>{example.options.map((option, line) => <li key={line}>{option}</li>)}</ol><b>{score(example.score)}</b></div>)}</div>
-              <p className="flame-small-note">확률 분포에서 선택한 대표 조합입니다. 표시되지 않은 조합도 세 줄의 환산 합계로 판단하세요.</p>
+              <p className="flame-small-note">확률 분포에서 선택한 대표 조합입니다. {selected.allThresholds?.some(row => row.firstLineDependent)
+                ? '프라임 모드에서는 첫 줄에 따라 종료 기준이 달라지므로, 대표 조합의 환산값만으로 판단하지 말고 점수별 행동표에서 첫 줄 조건을 함께 확인하세요.'
+                : '표시되지 않은 조합도 세 줄의 환산 합계로 판단하세요.'}</p>
             </CalculatorCard>}
           </>}
         </>}
@@ -295,8 +318,11 @@ export default function AdditionalPage() {
             <label className="additional-field">모든 등급에 같은 기준 적용<NumericInput label="모든 등급의 동일 종료 기준" value={new Set(Object.values(settings.manual.thresholds)).size === 1 ? settings.manual.thresholds['에픽'] : ''} placeholder="일괄 입력" unit="% 이상" onChange={value => changeNested('manual', 'thresholds', Object.fromEntries(ADDITIONAL_GRADES.map(grade => [grade, value])))} /></label>
             <div className="additional-manual-grades">{ADDITIONAL_GRADES.map(grade => <label className={`additional-field additional-grade-${grade}`} key={grade}>{grade}<NumericInput label={`${grade} 직접 정한 종료 기준`} value={settings.manual.thresholds[grade]} unit="% 이상" onChange={value => changeNested('manual', 'thresholds', { ...settings.manual.thresholds, [grade]: value })} /></label>)}</div>
             <p className="flame-small-note">입력 후 ‘에디셔널 전략 비교’를 눌러 계산하세요. 수에큐는 에픽 종료 기준만 적용합니다. 수에큐와 메소 중 매번 유리한 수단을 고르는 전략은 위의 최적 선택 결과에서 확인할 수 있습니다.</p>
+            {settings.prime.on && settings.manual.method !== 'strange' && <p className="flame-small-note">목표 환산값에 도달할 때까지 일반 재설정과 프라임 사용을 비교합니다. 고정할 첫 줄과 나머지 두 줄의 환산값을 함께 반영합니다.</p>}
             <CalculateButton className="flame-calculate additional-manual-calculate" type="button" onClick={calculate}>직접 정한 전략 계산<span aria-hidden="true">→</span></CalculateButton>
-            {result?.manual && <div className="additional-manual-result">{result.manual.available ? <><h3>직접 정한 전략의 예상 결과</h3><Estimate strategy={result.manual} compact /><p className="additional-manual-value">예상 순가치 <b>{meso(result.manual.expectedNetValue)}</b></p><GradeDistribution grades={result.manual.finalGrades} /></> : <p className="additional-warning">{result.manual.reason || '이 조건으로는 설정한 종료 기준에 도달할 수 없습니다.'}</p>}</div>}
+            {result?.manual && <div className="additional-manual-result">{result.manual.available ? <><h3>직접 정한 전략의 예상 결과</h3><Estimate strategy={result.manual} compact />
+              {settings.prime.on && <><AttemptSplit strategy={result.manual} primeOn /><PrimeOptimizationSummary optimization={result.manual.primeOptimization} automatic={settings.prime.fixedKey === 'auto'} /></>}
+              <p className="additional-manual-value">예상 순가치 <b>{meso(result.manual.expectedNetValue)}</b></p><GradeDistribution grades={result.manual.finalGrades} /></> : <p className="additional-warning">{result.manual.reason || '이 조건으로는 설정한 종료 기준에 도달할 수 없습니다.'}</p>}</div>}
           </div>}
         </CalculatorCard>
 

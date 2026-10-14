@@ -124,6 +124,11 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .calculator-toggle-track > span { position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; transition: left .15s; }
 .calculator-toggle[aria-checked="true"] .calculator-toggle-track > span { left: 17px; }
 .calculator-toggle-description { margin: 4px 0 0 42px !important; color: var(--ui-muted); font-size: 10px; line-height: 1.8; }
+.calculator-prime-settings { display: flex; flex-direction: column; gap: 10px; }
+.calculator-prime-enabled { border-color: #5ec8f266; }
+.calculator-prime-result { padding: 12px; border: 1px solid #5ec8f244; border-radius: 8px; background: #5ec8f20a; color: var(--ui-muted); font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
+.calculator-prime-result > strong, .calculator-prime-result b { color: #5ec8f2; }
+.calculator-prime-result p { margin-top: 5px; }
 
 .calculator-header { margin-bottom: 30px; }
 .calculator-eyebrow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; color: var(--ui-accent); font-size: 10px; font-weight: 750; letter-spacing: .14em; }

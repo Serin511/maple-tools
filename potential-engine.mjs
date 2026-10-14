@@ -93,7 +93,7 @@ export function validateConfig(cfg) {
   for (const tier of ["epic", "unique", "legend"]) nonnegative(cfg.costs?.[tier], "재설정 비용");
   if (cfg.prime?.on) {
     nonnegative(cfg.prime.cost, "프라임 큐브 비용");
-    if (!primeAtomList(cfg.part, cfg.level).some((a) => a.key === cfg.prime.fixedKey))
+    if (cfg.prime.fixedKey !== "auto" && !primeAtomList(cfg.part, cfg.level).some((a) => a.key === cfg.prime.fixedKey))
       throw new RangeError("이 부위에서 고정할 수 없는 프라임 옵션입니다.");
   }
   return cfg;
@@ -350,6 +350,13 @@ export function solvePrime(part, level, fixedAtom, cands, _legacyAllstatCount, f
 // gShift: 재설정 1회의 기회비용(장기 회당 기대 이득). 판정(판매/홀드·최적 정지)에만 반영, 실제 비용 계산엔 미반영
 export function buildEngine(cfg, gShift = 0) {
   validateConfig(cfg);
+  if (cfg.prime?.on && cfg.prime.fixedKey === "auto")
+    return optimizePrime(cfg, candidate => buildSpecificEngine(candidate, gShift));
+  return buildSpecificEngine(cfg, gShift);
+}
+
+function buildSpecificEngine(cfg, gShift = 0) {
+  validateConfig(cfg);
   if (!Number.isFinite(gShift)) throw new RangeError("기회비용은 유한한 수여야 합니다.");
   const { part, level, targetsU, targetsL, fee, miracle, costs, itemPrice, floorPrice, autoExclude } = cfg;
   const feeMul = 1 - fee / 100;
@@ -550,7 +557,7 @@ export function buildEngine(cfg, gShift = 0) {
 
 // 재설정 1회당 기대 이득 g를 최대화하는 정책 탐색 (Dinkelbach 고정점 반복)
 //  판정은 g를 기회비용으로 쓰고, 그 판정으로 계산한 g가 다시 판정을 바꾸므로 수렴할 때까지 반복. 최고 g 정책 채택
-export function solveEngine(cfg) {
+function solveSpecificEngine(cfg) {
   let g = 0, best = null;
   for (let i = 0; i < 12; i++) {
     const eng = buildEngine(cfg, g);
@@ -560,6 +567,56 @@ export function solveEngine(cfg) {
     g = gNew;
   }
   return best;
+}
+
+const profitPerReset = engine => engine.steady.resets > 1e-9
+  ? engine.steady.profit / engine.steady.resets : 0;
+
+// Compare complete buy/reset/sell policies, rather than the conditional value
+// after obtaining a fixed first line. Every reset, including Prime, is counted.
+// The no-Prime policy remains an option when none of the fixed lines improves it.
+function optimizePrime(cfg, solve) {
+  const baseline = solve({ ...cfg, prime: { ...cfg.prime, on: false } });
+  const baselineProfitPerReset = profitPerReset(baseline);
+  let selected = baseline, selectedAtom = null, bestCandidate = null;
+  const candidates = primeAtomList(cfg.part, cfg.level).map(atom => {
+    const candidate = solve({ ...cfg, prime: { ...cfg.prime, fixedKey: atom.key } });
+    const metric = profitPerReset(candidate);
+    const comparison = {
+      fixedKey: atom.key, fixedLabel: atomLabel(atom), profitPerReset: metric,
+      profit: candidate.steady.profit, resets: candidate.steady.resets,
+      primeResets: candidate.legPrimeRolls,
+    };
+    if (!bestCandidate || metric > bestCandidate.profitPerReset + 1e-6) bestCandidate = comparison;
+    if (metric > profitPerReset(selected) + 1e-6) {
+      selected = candidate;
+      selectedAtom = atom;
+    }
+    return comparison;
+  });
+  const hasTargets = baseline.lCap.length > 0;
+  selected.resolvedPrime = {
+    ...cfg.prime, on: selectedAtom !== null,
+    fixedKey: selectedAtom?.key ?? (hasTargets ? bestCandidate?.fixedKey : null) ?? null,
+  };
+  selected.primeOptimization = {
+    selectedFixedKey: selectedAtom?.key ?? null,
+    selectedFixedLabel: selectedAtom ? atomLabel(selectedAtom) : null,
+    bestFixedKey: hasTargets ? bestCandidate?.fixedKey ?? null : null,
+    bestFixedLabel: hasTargets ? bestCandidate?.fixedLabel ?? null : null,
+    profitPerReset: profitPerReset(selected), baselineProfitPerReset,
+    improvementPerReset: profitPerReset(selected) - baselineProfitPerReset,
+    baseline: { ...baseline.steady, profitPerReset: baselineProfitPerReset },
+    candidates,
+    reason: selectedAtom ? "selected" : hasTargets ? "no-benefit" : "no-targets",
+  };
+  return selected;
+}
+
+export function solveEngine(cfg) {
+  validateConfig(cfg);
+  return cfg.prime?.on && cfg.prime.fixedKey === "auto"
+    ? optimizePrime(cfg, solveSpecificEngine) : solveSpecificEngine(cfg);
 }
 
 // ---------- 몬테카를로 (분포·구성비) ----------

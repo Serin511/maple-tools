@@ -48,6 +48,7 @@ export default function ExamplePage() {
 | `TradeResetCostSettings` | `costs`, `note` | 등급별 재설정 비용을 같은 카드·정렬로 입력 |
 | `PityStackFields` | `fields` | 현재 등급부터 도달 가능한 천장 스택을 장비 설정에서 입력 |
 | `ToggleField` | `on`, `onChange`, `label`, `color`, `description` | 미라클·판매 정책·결과 유지 옵션을 같은 스위치로 제공 |
+| `PrimeCubeSettings` | `prime`, `onChange`, `options`, `label`, `priceLabel`, `description`, `optimization` | 세 잠재능력 메뉴의 프라임 활성화·가격·고정 첫 줄 선택·최적화 결과를 공유 |
 | `CharacterEfficiencySettings` | `settings`, `onChange`, `onMainStatChange`, `criticalDamageDisabled`, `children` | 두 에디셔널 메뉴의 공통 레벨·환산 효율 패널 |
 | `CalculatorFooter` | `children` | 기본 브라우저 저장 안내 또는 기능별 안내 |
 
@@ -61,11 +62,17 @@ export default function ExamplePage() {
 
 캐릭터 효율의 공통 기본값과 주스탯→부스탯 매핑은 `additional-data.mjs`에서 가져온다. 패널의 초기값·초기화 버튼·계산 엔진이 같은 기본값을 사용해야 한다. 드롭·메소는 이 환산 모델에 포함하지 않는다. 전략만의 쿨타임 환산 같은 추가 설정은 공통 패널의 `children`에 별도 영역으로 넣는다. 장사 메뉴는 네 주스탯의 가격 조건을 동시에 비교하므로 단일 주스탯 선택을 요구하지 않는다.
 
+프라임 설정은 `PrimeCubeSettings`에 `{ on, cost, fixedKey }`를 전달한다. `cost`는 메소 단위이며 `NumericField`에서 억 메소로 표시한다. 일반 잠재능력의 기존 `primeOn`·`primeCostEok`·`primeFixed` 저장 형식은 페이지에서만 변환한다. 에디셔널은 `settings.prime` 객체를 저장하고 기본 가격은 14억 메소다. 공통 컴포넌트는 모드를 켤 때 `fixedKey: 'auto'`를 선택하고, **고정할 1줄 옵션**의 첫 항목으로 **자동 최적화**를 제공한다. 저장된 유효한 수동 선택을 복원할 때는 이 활성화 동작을 다시 실행하지 않는다.
+
+고정 후보는 각 모델의 현재 부위·레벨에서 실제 가능한 레전드리 첫 줄 목록을 전달한다. 옵션 이름을 임의로 합치거나 같은 환산 점수라는 이유로 후보를 합치지 않는다. 장비 변경으로 수동 후보가 무효가 되면 자동 최적화로 돌아간다. 선택한 옵션·프라임 미사용과 비교한 이득은 엔진이 반환한 `optimization`으로 표시하며 화면에서 다시 계산하지 않는다. 장사 모델의 목적은 총 재설정 횟수당 기대 이득이고, 전략 모델의 목적은 스탯 상승의 가치에서 총비용을 뺀 기대값이다. 프라임 사용이 유리하지 않으면 미사용 판단을 설명한다.
+
 ## 디자인 토큰과 반응형
 
 공통 색·글꼴은 `ui.css`의 `--ui-*` 변수에 정의한다. 배경, 패널, 테두리, 본문·보조 글자, 강조 색을 개별 페이지에 다시 하드코딩하지 않는다. 공통 CSS는 Shell에서 기능별 CSS 뒤에 가져온다. 기본 화면은 최대 1240px, 설정 350px + 결과 영역, 간격 22px이고 740px 이하에서는 한 열로 바뀐다. 375px에서도 문서 전체가 가로로 넘치지 않아야 한다. 넓은 확률표·가격표는 해당 카드 안에서만 가로 스크롤한다.
 
 키보드 focus가 보이게 하고, 선택 버튼에는 `aria-pressed`, 스위치에는 `role="switch"`와 `aria-checked`를 사용한다. 세부 설명을 여는 기능은 버튼·details로 조작 가능해야 하며 마우스 hover만으로 제공하지 않는다. 터치 환경의 최소 입력·버튼 높이는 44px이고 움직임 줄이기 설정을 존중한다.
+
+숫자 입력은 공통 CSS에서 브라우저의 증감 화살표를 숨긴다. 새 숫자 입력도 `NumericField`를 사용하고 각 페이지에서 spinner 스타일을 다시 정의하지 않는다.
 
 ## 계산·입력·저장 동작
 
@@ -81,3 +88,5 @@ export default function ExamplePage() {
 계산 엔진은 JSX에서 분리한 순수 `.mjs` 모듈로 만든다. `npm test`에서 독립적인 수식·기하분포·확률 질량 보존 등으로 검증하고, 단순히 구현의 내부 배열을 복제한 테스트로 대체하지 않는다. 실제 확률 데이터의 출처·지원 범위·근사 가정은 `docs/*-model.md`에 기록한다.
 
 `npm run test:ui`는 실제 프로덕션 HTML을 빌드하고 임시 HTTP 서버·Chromium을 생성·정리한다. 새 메뉴를 추가하면 `tests/browser/ui.test.mjs`의 경로 목록과 실제 계산 시나리오를 함께 추가한다. 제목·메뉴 상태, 모바일 폭, 대표 Worker 결과, 입력 오류와 복구, 저장·프리셋, 키보드 조작을 검증한다. CI와 main 배포는 엔진·브라우저 검증을 통과한 뒤 진행한다.
+
+공통 설정을 검증할 때는 `main:visible` 안에서 컨트롤을 찾는다. Shell이 이전 페이지를 유지하므로 같은 이름의 입력이 숨겨진 페이지에도 있을 수 있다. 프라임 회귀에는 활성화 시 자동 선택, 14억 기본 가격, 수동 선택의 저장·복원, 부위·레벨 변경에 따른 후보 갱신, 실제 Worker의 프라임 결과를 포함한다.

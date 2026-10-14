@@ -191,3 +191,121 @@ test('a mixed strategy exposes pity-dependent strange and reset action ranges', 
   assert.deepEqual(r.thresholds.find(row => row.grade === '에픽' && row.stack === 2).actionRanges,
     [{ minScore: 0, maxScore: 8, action: 'reset' }]);
 });
+
+const primeFixture = (overrides = {}) => settings({
+  retainPaid: true, currentFirstKey: 'B', currentScore: 0,
+  distributions: { 레전드리: { reset: [
+    { score: 0, firstKey: 'A', probability: .1 },
+    { score: 0, firstKey: 'B', probability: .8 },
+    { score: 10, firstKey: 'B', probability: .1 },
+  ] } },
+  prime: { on: true, cost: .5, fixedKey: 'A', distribution: coin },
+  ...overrides,
+});
+
+test('Prime first-line identity governs immediate entry even when current scores coincide', () => {
+  const matching = solveAdditionalStrategy(primeFixture({ currentFirstKey: 'A' }));
+  assert.equal(matching.action, 'prime'); close(matching.primeAttempts, 2); close(matching.primeCost, 1);
+  close(matching.expectedFinalScore, 10); close(matching.netValue, 9);
+  const other = solveAdditionalStrategy(primeFixture());
+  assert.equal(other.action, 'reset'); close(other.resetAttempts, 5); close(other.primeAttempts, 1);
+  close(other.expectedCost, 5.5); close(other.netValue, 4.5);
+  assert.equal(other.thresholds[0].firstLineDependent, true);
+  assert.ok(other.currentActionRanges.some(row => row.action === 'prime' && row.firstKey === 'A'));
+});
+
+test('normal retained results select the valuable first line even when its score is lower', () => {
+  const r = solveAdditionalStrategy(primeFixture({ currentScore: 4 }));
+  // On an A/0 draw, retain the new entire tuple rather than the old B/4.
+  assert.equal(r.action, 'reset'); close(r.resetAttempts, 5); close(r.primeAttempts, 1);
+  close(r.expectedFinalScore, 10); close(r.expectedFinalValue, 4.5);
+  const retainedPrime = solveAdditionalStrategy(primeFixture({ currentFirstKey: 'A', currentScore: 8, retainPaid: false }));
+  // Prime always allows old/new selection even with ordinary retention off.
+  assert.equal(retainedPrime.action, 'prime'); close(retainedPrime.primeAttempts, 2); close(retainedPrime.expectedFinalScore, 10);
+});
+
+test('high Prime cost cannot make the optimized strategy worse than normal reset', () => {
+  const cfg = primeFixture({ prime: { ...primeFixture().prime, cost: 100 } });
+  const baseline = solveAdditionalStrategy({ ...cfg, prime: { on: false } });
+  const withPrime = solveAdditionalStrategy(cfg);
+  close(withPrime.netValue, baseline.netValue); close(withPrime.expectedCost, baseline.expectedCost);
+  assert.equal(withPrime.primeAttempts, 0);
+});
+
+test('Prime transitions are available after gradeup but never to strange-only Epic', () => {
+  const cfg = primeFixture({ currentGrade: '유니크', currentFirstKey: null,
+    distributions: { 유니크: { reset: delta(0) }, 레전드리: { reset: [{ score: 0, firstKey: 'A', probability: 1 }] } },
+    pity: { 유니크: 0 }, stacks: { 유니크: 0 }, costs: { 유니크: 1, 레전드리: 100 },
+  });
+  const r = solveAdditionalStrategy(cfg);
+  assert.equal(r.action, 'reset'); close(r.resetAttempts, 1); close(r.primeAttempts, 2); close(r.netValue, 8);
+  const strange = { ...cfg, currentGrade: '에픽', strategy: 'strange', currentScore: 0, strangeCost: 1,
+    distributions: { 에픽: { strange: coin } } };
+  const withPrime = solveAdditionalStrategy(strange), without = solveAdditionalStrategy({ ...strange, prime: { on: false } });
+  close(withPrime.netValue, without.netValue); assert.equal(withPrime.primeEnabled, false); assert.equal(withPrime.primeAttempts, 0);
+});
+
+// Independent Bellman iteration explicitly keeps both first-line identities
+// and compares complete old/new outcomes. A manual target is absorbing on
+// its first hit; below it the normal/Prime choice remains optimized.
+function primeBellman(cfg, target = null) {
+  const outcomes = cfg.distributions.레전드리.reset;
+  const states = new Map();
+  const key = (score, firstKey) => `${score}/${firstKey}`;
+  const insert = (score, firstKey) => states.set(key(score, firstKey), { score, firstKey, value: score });
+  for (const row of outcomes) insert(row.score, row.firstKey);
+  for (const row of cfg.prime.distribution) insert(row.score, cfg.prime.fixedKey);
+  insert(cfg.currentScore, cfg.currentFirstKey);
+  const next = row => states.get(key(row.score, row.firstKey)).value;
+  for (let pass = 0; pass < 5000; pass++) {
+    let residual = 0;
+    for (const state of states.values()) {
+      if (target !== null && state.score >= target) continue;
+      const hit = row => target !== null && row.score >= target;
+      const reset = -cfg.costs.레전드리 + outcomes.reduce((sum, row) => sum + row.probability *
+        (hit(row) || !cfg.retainPaid ? next(row) : Math.max(state.value, next(row))), 0);
+      let value = target === null ? Math.max(state.score, reset) : reset;
+      if (state.firstKey === cfg.prime.fixedKey) {
+        const prime = -cfg.prime.cost + cfg.prime.distribution.reduce((sum, row) => {
+          const drawn = { ...row, firstKey: cfg.prime.fixedKey };
+          return sum + row.probability * (hit(row) ? next(drawn) : Math.max(state.value, next(drawn)));
+        }, 0);
+        value = Math.max(value, prime);
+      }
+      residual = Math.max(residual, Math.abs(value - state.value)); state.value = value;
+    }
+    if (residual < 1e-12) return [...states.values()];
+  }
+  throw new Error('Independent Prime Bellman oracle did not converge');
+}
+
+test('joint normal/Prime policies agree with independent complete-state Bellman iteration', () => {
+  for (const retainPaid of [false, true]) for (const primeCost of [0, .2, 3, 30]) {
+    const cfg = primeFixture({ retainPaid, prime: { ...primeFixture().prime, cost: primeCost } });
+    for (const state of primeBellman(cfg)) {
+      const r = solveAdditionalStrategy({ ...cfg, currentScore: state.score, currentFirstKey: state.firstKey });
+      close(r.expectedFinalValue, state.value);
+      close(r.expectedCost, r.resetAttempts * cfg.costs.레전드리 + r.primeAttempts * primeCost);
+      close(r.expectedAttempts, r.resetAttempts + r.primeAttempts);
+      close(r.primeCost, r.primeAttempts * primeCost);
+    }
+  }
+});
+
+test('manual targets combine Prime and normal resets and keep target hits absorbing', () => {
+  for (const retainPaid of [false, true]) for (const primeCost of [0, .2, 3, 30]) {
+    const cfg = primeFixture({ retainPaid, prime: { ...primeFixture().prime, cost: primeCost } });
+    for (const state of primeBellman(cfg, 5)) {
+      const r = evaluateAdditionalThresholds({ ...cfg, currentScore: state.score, currentFirstKey: state.firstKey }, { thresholds: { 레전드리: 5 } });
+      close(r.expectedFinalValue, state.value); assert.equal(r.currentCutoff, 5);
+      if (state.score >= 5) assert.equal(r.action, 'stop');
+    }
+  }
+  const forcedLowTarget = primeFixture({
+    distributions: { 레전드리: { reset: [{ score: 2, firstKey: 'B', probability: .5 }, { score: 10, firstKey: 'B', probability: .5 }] } },
+  });
+  const r = evaluateAdditionalThresholds(forcedLowTarget, { thresholds: { 레전드리: 1 } });
+  close(r.expectedFinalScore, 6); close(r.expectedCost, 1); close(r.expectedFinalValue, 5);
+  const unreachable = evaluateAdditionalThresholds(primeFixture(), { thresholds: { 레전드리: 11 } });
+  assert.equal(unreachable.possible, false); assert.equal(unreachable.expectedCost, Infinity);
+});

@@ -142,6 +142,59 @@ export function ToggleField({ on, onChange, label, color = 'var(--ui-accent)', d
   </div>;
 }
 
+const primeMeso = value => {
+  if (!Number.isFinite(value)) return '—';
+  const amount = Math.abs(value);
+  const scale = amount >= 1e8 ? 1e8 : amount >= 1e4 ? 1e4 : 1;
+  const unit = scale === 1e8 ? '억' : scale === 1e4 ? '만' : '';
+  return `${(value / scale).toLocaleString('ko-KR', { maximumFractionDigits: 2 })}${unit} 메소`;
+};
+
+/** Prime calculators share the same first-line selection and result feedback. */
+export function PrimeOptimizationSummary({ optimization, automatic = false }) {
+  if (!optimization) return null;
+  const { selectedFixedLabel, bestFixedLabel, reason } = optimization;
+  const value = optimization.objectiveValue ?? optimization.value ?? optimization.profitPerReset;
+  const improvement = optimization.improvement ?? optimization.improvementPerReset
+    ?? (Number.isFinite(value) && Number.isFinite(optimization.baselineValue) ? value - optimization.baselineValue : undefined);
+  const objectiveLabel = optimization.objectiveLabel || '재설정 1회당 기대 이득';
+  return <div className="calculator-prime-result" role="status">
+    <strong>{automatic ? '자동 최적화 결과' : '프라임 비교 결과'}</strong>
+    <p>{reason === 'no-targets' ? '레전드리 판매가를 입력하면 고정 옵션을 비교합니다.'
+      : reason === 'non-selling' ? '최적 정책에서는 판매하지 않고 프라임 재설정을 계속합니다. 매물당 기대 수익을 계산할 수 없습니다.'
+      : reason === 'no-benefit' ? '프라임 사용으로 늘어나는 이득이 없어 일반 재설정을 유지합니다.'
+      : selectedFixedLabel ? <>고정 옵션: <b>{selectedFixedLabel}</b></>
+      : '프라임 사용으로 늘어나는 이득이 없어 일반 재설정을 유지합니다.'}</p>
+    {reason === 'non-selling' && selectedFixedLabel && <p>고정 옵션: <b>{selectedFixedLabel}</b></p>}
+    {(!selectedFixedLabel || reason === 'no-benefit') && bestFixedLabel && <p>가장 유리한 고정 후보: {bestFixedLabel}</p>}
+    {Number.isFinite(value) && <p>{objectiveLabel}: <b>{primeMeso(value)}</b>
+      {Number.isFinite(improvement) && <> · 프라임 미사용 대비 <b>{improvement > 0 ? '+' : ''}{primeMeso(improvement)}</b></>}</p>}
+  </div>;
+}
+
+export function PrimeCubeSettings({ prime, onChange, options, label = '프라임 큐브 모드 (레전드리 1줄 고정)',
+  priceLabel = '프라임 큐브 가격 (억 메소 / 회)', description, optimization }) {
+  return <CalculatorCard as="div" className={`calculator-prime-settings${prime.on ? ' calculator-prime-enabled' : ''}`}>
+    <ToggleField on={prime.on} onChange={on => onChange({ ...prime, on, ...(on ? { fixedKey: 'auto' } : {}) })}
+      label={label} color="#5ec8f2" />
+    {prime.on && <>
+      <label className="calculator-trade-field">{priceLabel}
+        <NumericField label={priceLabel} value={prime.cost} scale={1e-8} unit="억 메소"
+          onChange={cost => onChange({ ...prime, cost })} />
+      </label>
+      <label className="calculator-trade-field">고정할 1줄 옵션
+        <select aria-label="고정할 1줄 옵션" value={prime.fixedKey} onChange={event => onChange({ ...prime, fixedKey: event.target.value })}>
+          <option value="auto">자동 최적화</option>
+          {options.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+        </select>
+      </label>
+      {description && <p className="calculator-trade-help">{description}</p>}
+      {prime.fixedKey === 'auto' && <p className="calculator-trade-help">현재 부위의 레전드리 첫 줄 옵션을 모두 비교합니다. 프라임 미사용보다 이득이 커지는 최적의 고정 옵션을 선택합니다.</p>}
+      <PrimeOptimizationSummary optimization={optimization} automatic={prime.fixedKey === 'auto'} />
+    </>}
+  </CalculatorCard>;
+}
+
 export const CHARACTER_EFFICIENCY_FIELDS = Object.freeze([
   { key: 'mainFlat', label: '주스탯 +10', scale: 10 },
   { key: 'subFlat', label: '부스탯 +10', scale: 10 },

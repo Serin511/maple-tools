@@ -94,6 +94,234 @@ async function assertNoOverflow(page, label) {
   assert.ok(size.content <= size.viewport + 1, `${label}: page is ${size.content}px wide at a ${size.viewport}px viewport.`);
 }
 
+const primeRoutes = [
+  {
+    path: 'potential', storageKey: 'mpc:auto:v1',
+    toggle: '프라임 큐브 모드 (레전드리 1줄 고정)', price: '프라임 큐브 가격 (억 메소 / 회)',
+    defaultPrice: '7', part: '착용 부위', hat: 'hat', glove: 'glove', hatOnly: 'CD2',
+    manual: 'STR', preset: true,
+  },
+  ...['additional', 'additional-trade'].map(path => ({
+    path, storageKey: `maple:${path}:settings:v1`,
+    toggle: '프라임 에디셔널 큐브 모드 (레전드리 1줄 고정)',
+    price: '프라임 에디셔널 큐브 가격 (억 메소 / 회)', defaultPrice: '14',
+    part: '대상 아이템 부위', hat: '모자', glove: '장갑', hatOnly: '스킬 재사용 대기시간 -1초',
+    manual: 'STR +8%', preset: path === 'additional-trade',
+  })),
+];
+
+// Control/restore tests do not need to wait for unrelated initial calculations.
+const idleWorkers = () => {
+  window.Worker = class { postMessage() {} terminate() {} };
+};
+
+test('prime settings share keyboard controls, automatic defaults and phone layout', async () => {
+  for (const viewport of [{ width: 1440, height: 1000 }, { width: 375, height: 812 }]) {
+    await withPage(async page => {
+      for (const route of primeRoutes) {
+        await open(page, route.path);
+        const main = page.locator('main:visible');
+        const panel = main.locator('.calculator-prime-settings');
+        const toggle = panel.getByRole('switch', { name: route.toggle, exact: true });
+        assert.equal(await toggle.getAttribute('aria-checked'), 'false');
+        assert.equal(await panel.getByLabel('고정할 1줄 옵션', { exact: true }).count(), 0);
+        await toggle.focus();
+        await page.keyboard.press('Space');
+        assert.equal(await toggle.getAttribute('aria-checked'), 'true');
+        const price = panel.getByLabel(route.price, { exact: true });
+        const fixed = panel.getByLabel('고정할 1줄 옵션', { exact: true });
+        assert.equal(await price.inputValue(), route.defaultPrice);
+        assert.equal(await fixed.inputValue(), 'auto');
+        assert.equal(await fixed.locator('option').first().innerText(), '자동 최적화');
+        assert.equal(await price.evaluate(input => getComputedStyle(input).appearance), 'textfield', 'Shared numeric controls must hide the native spinner.');
+        await page.keyboard.press('Tab');
+        assert.equal(await price.evaluate(input => input === document.activeElement), true);
+        await page.keyboard.press('Tab');
+        assert.equal(await fixed.evaluate(input => input === document.activeElement), true);
+
+        await main.getByLabel(route.part, { exact: true }).selectOption(route.hat);
+        await fixed.selectOption(route.hatOnly);
+        assert.equal(await fixed.inputValue(), route.hatOnly);
+        await main.getByLabel(route.part, { exact: true }).selectOption(route.glove);
+        assert.equal(await fixed.inputValue(), 'auto', 'A first-line option unavailable on the new part must return to automatic selection.');
+        assert.equal(await fixed.locator('option').filter({ hasText: route.path === 'potential' ? '쿨감' : '스킬 재사용' }).count(), 0);
+        await fixed.selectOption(route.manual);
+        await toggle.press('Enter');
+        assert.equal(await toggle.getAttribute('aria-checked'), 'false');
+        await toggle.press('Enter');
+        assert.equal(await fixed.inputValue(), 'auto', 'Every new activation must use automatic optimization by default.');
+        await assertNoOverflow(page, `${route.path} prime settings at ${viewport.width}px`);
+      }
+    }, { viewport, init: idleWorkers });
+  }
+});
+
+test('prime prices and manual first-line choices survive reload and trading presets', async () => {
+  for (const route of primeRoutes) {
+    await withPage(async page => {
+      await open(page, route.path);
+      const main = page.locator('main:visible');
+      const panel = main.locator('.calculator-prime-settings');
+      const toggle = panel.getByRole('switch', { name: route.toggle, exact: true });
+      await main.getByLabel(route.part, { exact: true }).selectOption(route.hat);
+      await toggle.click();
+      const price = panel.getByLabel(route.price, { exact: true });
+      const fixed = panel.getByLabel('고정할 1줄 옵션', { exact: true });
+      await price.fill('1.25');
+      await fixed.selectOption(route.hatOnly);
+      await page.waitForFunction(({ key, potential, fixedKey }) => {
+        const saved = JSON.parse(localStorage.getItem(key));
+        return potential
+          ? saved?.primeOn === true && saved.primeCostEok === '1.25' && saved.primeFixed === fixedKey
+          : saved?.prime?.on === true && saved.prime.cost === 125000000 && saved.prime.fixedKey === fixedKey;
+      }, { key: route.storageKey, potential: route.path === 'potential', fixedKey: route.hatOnly });
+
+      if (route.preset) {
+        await main.getByLabel('저장할 프리셋 이름', { exact: true }).fill('수동 프라임');
+        await main.getByLabel('저장할 프리셋 이름', { exact: true }).press('Enter');
+        await fixed.selectOption('auto');
+        await price.fill('3');
+        const presets = main.getByLabel('저장된 프리셋', { exact: true });
+        await presets.selectOption('');
+        await presets.selectOption('수동 프라임');
+        assert.equal(await fixed.inputValue(), route.hatOnly, 'Applying a saved manual choice must preserve it rather than re-trigger activation.');
+        assert.equal(await price.inputValue(), '1.25');
+      }
+      await page.reload();
+      await page.getByRole('heading', { level: 1, name: routes.find(candidate => candidate.path === route.path).heading }).waitFor();
+      assert.equal(await toggle.getAttribute('aria-checked'), 'true');
+      assert.equal(await fixed.inputValue(), route.hatOnly, 'Reloading an enabled mode must preserve its valid manual choice.');
+      assert.equal(await price.inputValue(), '1.25');
+
+      await fixed.selectOption(route.manual);
+      if (route.path === 'additional') {
+        await main.getByLabel('아이템의 레벨 제한', { exact: true }).fill('250');
+      } else {
+        await main.getByLabel(route.path === 'potential' ? '레벨 제한' : '아이템 레벨 제한', { exact: true }).selectOption('250');
+      }
+      assert.equal(await fixed.inputValue(), route.path === 'potential' ? route.manual : 'auto',
+        'A level change must retain a valid first-line identity and replace an unavailable one.');
+      if (route.path !== 'potential') {
+        const obsoleteOption = fixed.locator('option[value="STR +8%"]');
+        assert.equal(await obsoleteOption.count(), 0);
+      }
+    }, { init: idleWorkers });
+  }
+});
+
+test('additional prime worker optimizes the fixed line and reports actual prime usage', { timeout: 120_000 }, async () => {
+  await withPage(async page => {
+    await open(page, 'additional');
+    await waitForText(page.locator('main:visible .calculator-status'), /계산 완료/);
+    const main = page.locator('main:visible');
+    const optimization = main.locator('.calculator-prime-result');
+    assert.match(await optimization.innerText(), /자동 최적화 결과/);
+    assert.match(await optimization.innerText(), /고정 옵션:.*STR \+8%/);
+    const results = main.getByRole('region', { name: '에디셔널 재설정 전략 비교 결과' });
+    assert.match(await results.innerText(), /프라임 에디셔널 큐브 사용/);
+    const primeAttempts = results.locator('.additional-attempt-split > span').filter({ hasText: '프라임 에디셔널 큐브' });
+    const count = await primeAttempts.locator('b').innerText();
+    assert.ok(Number(count.replace(/[,회]/g, '')) > 0, 'A Prime recommendation must report actual Prime attempts separately.');
+    assert.match(await primeAttempts.innerText(), /메소/);
+    await results.getByText('현재 등급·스택의 점수별 행동 보기', { exact: true }).click();
+    assert.equal(await results.getByRole('columnheader', { name: '첫 줄 조건', exact: true }).count(), 1,
+      'The prime strategy must explain actions using first-line identity rather than a scalar score alone.');
+    assert.match(await results.getByRole('table').innerText(), /STR \+8%/);
+    await assertNoOverflow(page, 'additional populated prime result');
+  }, {
+    viewport: { width: 375, height: 812 },
+    init: () => localStorage.setItem('maple:additional:settings:v1', JSON.stringify({
+      slot: '모자', level: 200, grade: '레전드리',
+      currentOptions: ['STR +8%', '없음', '없음'],
+      prime: { on: true, cost: 1000000, fixedKey: 'auto' },
+    })),
+  });
+});
+
+test('additional trade prime worker keeps the better baseline for a guaranteed sale', { timeout: 120_000 }, async () => {
+  await withPage(async page => {
+    await configureGuaranteedTrade(page);
+    const main = page.locator('main:visible');
+    await main.getByRole('switch', { name: '프라임 에디셔널 큐브 모드 (레전드리 1줄 고정)', exact: true }).click();
+    await main.getByRole('button', { name: /장사 기대 수익 계산/ }).click();
+    await waitForText(main.locator('.calculator-status'), /계산 완료/);
+    const optimization = main.locator('.calculator-prime-result');
+    assert.match(await optimization.innerText(), /자동 최적화 결과/);
+    assert.match(await optimization.innerText(), /프라임 사용으로 늘어나는 이득이 없어 일반 재설정을 유지합니다/);
+    const results = main.getByRole('region', { name: '에디셔널 장사 계산 결과' });
+    assert.equal(await results.locator('.at-result-hero strong').innerText(), '8.82억 메소');
+    const primeAttempts = results.locator('.at-metric-grid > div').filter({ hasText: '프라임 기대 횟수 · 현재 매물당' });
+    assert.equal(await primeAttempts.locator('b').innerText(), '0회');
+  });
+});
+
+test('additional trade prime worker selects a profitable first-line policy and separates its cost', { timeout: 120_000 }, async () => {
+  await withPage(async page => {
+    await open(page, 'additional-trade');
+    const main = page.locator('main:visible');
+    await main.getByRole('button', { name: /장사 기대 수익 계산/ }).click();
+    await waitForText(main.locator('.calculator-status'), /계산 완료/);
+    assert.match(await main.locator('.calculator-prime-result').innerText(), /고정 옵션:.*STR \+8%/);
+    const results = main.getByRole('region', { name: '에디셔널 장사 계산 결과' });
+    const attempts = results.locator('.at-metric-grid > div').filter({ hasText: '프라임 기대 횟수 · 현재 매물당' });
+    assert.ok(Number((await attempts.locator('b').innerText()).replace(/[,회]/g, '')) > 0);
+    const cost = results.locator('.at-metric-grid > div').filter({ hasText: '프라임 기대 비용 · 현재 매물당' });
+    assert.notEqual(await cost.locator('b').innerText(), '0 메소');
+    assert.match(await results.innerText(), /프라임 진입/);
+    await assertNoOverflow(page, 'additional-trade populated prime result');
+  }, {
+    viewport: { width: 375, height: 812 },
+    init: () => localStorage.setItem('maple:additional-trade:settings:v1', JSON.stringify({
+      slot: '모자', level: 200, startGrade: '레전드리', itemPrice: 0, fee: 0,
+      costs: { 에픽: 30800000, 유니크: 74800000, 레전드리: 100000000 },
+      prime: { on: true, cost: 1, fixedKey: 'auto' },
+      prices: { shared: [{ id: 'prime-str', stat: 'STR', min: 19, cd: 0, crit: 0, price: 1e12 }],
+        에픽: [], 유니크: [], 레전드리: [] },
+    })),
+  });
+});
+
+test('additional trade prime worker explains a non-selling optimum without showing it as a finite sale', { timeout: 120_000 }, async () => {
+  await withPage(async page => {
+    await open(page, 'additional-trade');
+    const main = page.locator('main:visible');
+    await main.getByRole('button', { name: /장사 기대 수익 계산/ }).click();
+    await waitForText(main.locator('.calculator-status'), /계산 완료/);
+    assert.match(await main.locator('.calculator-prime-result').innerText(), /판매하지 않고 프라임 재설정을 계속합니다/);
+    const results = main.getByRole('region', { name: '에디셔널 장사 계산 결과' });
+    assert.match(await results.locator('.at-impossible').innerText(), /매물당 기대값을 정의할 수 없습니다/);
+    assert.match(await results.locator('.at-impossible').innerText(), /참고 지표/);
+    assert.doesNotMatch(await results.locator('.at-result-hero').innerText(), /Infinity|NaN|무한/);
+    await assertNoOverflow(page, 'additional trade non-selling prime result');
+  }, {
+    viewport: { width: 375, height: 812 },
+    init: () => localStorage.setItem('maple:additional-trade:settings:v1', JSON.stringify({
+      slot: '모자', level: 200, startGrade: '레전드리', itemPrice: 2000000000, floorPrice: 0,
+      autoSell: true, prime: { on: true, cost: 1000000, fixedKey: 'auto' },
+      prices: { shared: [{ id: 'loss', stat: 'STR', min: 0, cd: 0, crit: 0, price: 100000000 }] },
+    })),
+  });
+});
+
+test('potential prime worker accepts automatic selection and publishes the chosen policy', { timeout: 120_000 }, async () => {
+  await withPage(async page => {
+    await open(page, 'potential');
+    const main = page.locator('main:visible');
+    await main.getByText('라운드당 기대 순익 (장기)', { exact: true }).waitFor({ timeout: 60_000 });
+    const summary = main.locator('.calculator-prime-result');
+    assert.match(await summary.innerText(), /자동 최적화 결과/);
+    assert.match(await summary.innerText(), /고정 옵션:.*STR\+12%/);
+    assert.match(await summary.innerText(), /프라임 미사용 대비/);
+    assert.match(await main.getByRole('region', { name: '잠재능력 판매가와 계산 결과' }).innerText(), /프라임 모드/);
+  }, {
+    init: () => localStorage.setItem('mpc:auto:v1', JSON.stringify({
+      part: 'heart', level: 200, itemPriceEok: '0', floorEok: '0',
+      primeOn: true, primeCostEok: '0.0000001', primeFixed: 'auto',
+      statPrices: { 'l:STR_36': '10000' },
+    })),
+  });
+});
+
 test('all calculator routes expose their title, current navigation and one main landmark', async () => {
   await withPage(async page => {
     await open(page, 'potential');

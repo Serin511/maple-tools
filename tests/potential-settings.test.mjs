@@ -10,7 +10,7 @@ test('missing and malformed snapshots restore the original defaults as independe
     hatRows: [{ cd: 2, statMin: 12, stat: 'STR', price: '' }, { cd: 3, statMin: 0, stat: 'STR', price: '' }, { cd: 4, statMin: 0, stat: 'STR', price: '' }],
     gloveRows: [{ crit: 8, statMin: 12, stat: 'STR', price: '' }, { crit: 16, statMin: 0, stat: 'STR', price: '' }, { crit: 24, statMin: 0, stat: 'STR', price: '' }],
     accPrices: { drop2: '', meso2: '', dropmeso: '', dm3: '' },
-    pityMode: 'single', primeOn: false, primeCostEok: '7', primeFixed: 'STR',
+    pityMode: 'single', primeOn: false, primeCostEok: '7', primeFixed: 'auto',
   };
   for (const value of [undefined, null, false, 1, 'bad', [], {}]) assert.deepEqual(normalizePotentialSettings(value), expected);
   const changed = normalizePotentialSettings();
@@ -50,7 +50,21 @@ test('valid inputs and blank editable numbers survive loading with level-specifi
   assert.equal(result.primeOn, true);
   assert.equal(result.primeFixed, 'CD2');
   assert.equal(result.pityMode, 'campaign');
-  assert.equal(normalizePotentialSettings({ part: 'acc', primeFixed: 'CD2' }).primeFixed, 'STR');
+  assert.equal(normalizePotentialSettings({ part: 'acc', primeFixed: 'CD2' }).primeFixed, 'auto');
+});
+
+test('Prime defaults to automatic selection while saved manual options remain explicit', () => {
+  for (const primeFixed of [undefined, null, 'invalid', 'CRIT'])
+    assert.equal(normalizePotentialSettings({ part: 'hat', primeFixed }).primeFixed, 'auto');
+  for (const primeFixed of ['auto', 'STR', 'ALL', 'CD2']) {
+    const saved = { part: 'hat', primeOn: true, primeFixed, primeCostEok: '9' };
+    const before = structuredClone(saved);
+    const restored = normalizePotentialPresets({ selected: saved }).selected;
+    assert.equal(restored.primeFixed, primeFixed);
+    assert.equal(restored.primeCostEok, '9');
+    assert.equal(restored.primeOn, true);
+    assert.deepEqual(saved, before);
+  }
 });
 
 test('retired all-stat settings and presets always restore inclusion without altering saved inputs', () => {

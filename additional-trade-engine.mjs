@@ -1,6 +1,7 @@
 // Exact finite-state average-profit optimizer for additional-potential trading.
 // Each reset is one decision epoch. The options are observed after the reset;
 // the policy then either sells (and buys a replacement) or keeps resetting.
+import { prepareAdditionalTradePrime, optimizeAdditionalTradePrime } from './additional-trade-prime.mjs';
 export const ADDITIONAL_TRADE_GRADES = ['에픽', '유니크', '레전드리'];
 const GRADES = ADDITIONAL_TRADE_GRADES;
 const close = (a, b, tol = 1e-8) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(a), Math.abs(b));
@@ -32,7 +33,8 @@ function prepare(input) {
       mass += probability;
       const price = entry.price === null ? null : finite(entry.price, `${grade} 판매가`);
       if (entry.targetId != null && typeof entry.targetId !== 'string') throw new Error('targetId는 문자열 또는 null이어야 합니다.');
-      return { price, probability, targetId: entry.targetId ?? null, index };
+      if (entry.firstKey != null && typeof entry.firstKey !== 'string') throw new Error('firstKey는 문자열 또는 null이어야 합니다.');
+      return { price, probability, targetId: entry.targetId ?? null, firstKey: entry.firstKey ?? null, index };
     });
     if (Math.abs(mass - 1) > 1e-7) throw new Error(`${grade} 확률의 합이 1이어야 합니다.`);
     cfg.distributions[grade] = cfg.distributions[grade].map(x => ({ ...x, probability: x.probability / mass }));
@@ -341,21 +343,22 @@ function optimizeNoLegendSale(cfg, model) {
 
 function transitionsFor(model, policy) {
   return model.rows.map((row, i) => {
-    const acts = policy.decisions[i], trans = new Map(), continuing = new Map(); let revenue = 0, netRevenue = 0, sold = 0, finalGrades = [0, 0, 0];
+    const acts = policy.decisions[i], trans = new Map(), continuing = new Map(); let revenue = 0, netRevenue = 0, sold = 0, primeAttempts = 0, primeCost = 0, finalGrades = [0, 0, 0];
     let cursor = 0;
     for (const branch of row.branches) for (const o of branch.outcomes) if (o.p > 0) {
-      const action = acts[cursor++].action;
-      if (action === 'sell') {
+      const decision = acts[cursor++], action = decision.action;
+      if (action === 'sell' || action === 'prime') {
         trans.set(o.sellIndex, (trans.get(o.sellIndex) || 0) + o.p);
-        revenue += o.p * o.effectivePrice;
-        netRevenue += o.p * o.effectivePrice * (1 - model.cfg.fee);
+        revenue += o.p * (action === 'prime' ? decision.prime.revenue : o.effectivePrice);
+        netRevenue += o.p * (action === 'prime' ? decision.prime.netRevenue : o.effectivePrice * (1 - model.cfg.fee));
+        if (action === 'prime') { primeAttempts += o.p * decision.prime.attempts; primeCost += o.p * decision.prime.cost; }
         sold += o.p; finalGrades[branch.gradeIndex] += o.p;
       } else {
         trans.set(o.holdIndex, (trans.get(o.holdIndex) || 0) + o.p);
         continuing.set(o.holdIndex, (continuing.get(o.holdIndex) || 0) + o.p);
       }
     }
-    return { transitions: [...trans], continuing: [...continuing], revenue, netRevenue, sold, finalGrades, resetCost: row.cost, grade: row.state.g };
+    return { transitions: [...trans], continuing: [...continuing], revenue, netRevenue, sold, finalGrades, primeAttempts, primeCost, resetCost: row.cost + primeCost, grade: row.state.g };
   });
 }
 
@@ -387,23 +390,29 @@ function stationary(model, policy, cfg) {
     norm += mass[i];
   }
   for (let i = 0; i < model.n; i++) mass[i] /= norm;
-  let saleRate = 0, revenueRate = 0, netRate = 0, costRate = 0;
+  let saleRate = 0, revenueRate = 0, netRate = 0, costRate = 0, primeAttemptRate = 0, primeCostRate = 0;
   const gradeVisits = [0, 0, 0], soldGrades = [0, 0, 0];
   for (let i = 0; i < model.n; i++) if (mass[i]) {
     const c = chain[i]; saleRate += mass[i] * c.sold; revenueRate += mass[i] * c.revenue;
     netRate += mass[i] * c.netRevenue; costRate += mass[i] * c.resetCost; gradeVisits[c.grade] += mass[i];
+    primeAttemptRate += mass[i] * c.primeAttempts; primeCostRate += mass[i] * c.primeCost;
     for (let g = 0; g < 3; g++) soldGrades[g] += mass[i] * c.finalGrades[g];
   }
   if (!(saleRate > 0)) return { possible: false, reason: '최적 정책에서는 매물을 판매하지 않아 장기 매물당 지표를 정의할 수 없습니다.', profitPerReset: -costRate };
   const attemptsPerItem = 1 / saleRate;
+  const durationRate = 1 + primeAttemptRate;
+  gradeVisits[2] += primeAttemptRate;
   return {
     possible: true, saleRate,
     expectedRevenue: revenueRate * attemptsPerItem,
     expectedNetRevenue: netRate * attemptsPerItem,
     expectedCost: costRate * attemptsPerItem,
-    expectedAttempts: attemptsPerItem,
+    expectedAttempts: durationRate * attemptsPerItem,
+    expectedRegularAttempts: attemptsPerItem,
+    expectedPrimeAttempts: primeAttemptRate * attemptsPerItem,
+    expectedPrimeCost: primeCostRate * attemptsPerItem,
     expectedProfit: (netRate - costRate - cfg.itemPrice * saleRate) * attemptsPerItem,
-    profitPerReset: netRate - costRate - cfg.itemPrice * saleRate,
+    profitPerReset: (netRate - costRate - cfg.itemPrice * saleRate) / durationRate,
     attemptsByGrade: Object.fromEntries(GRADES.map((g, i) => [g, gradeVisits[i] * attemptsPerItem])),
     finalGrades: Object.fromEntries(GRADES.map((g, i) => [g, soldGrades[i] / saleRate])),
   };
@@ -415,16 +424,20 @@ function transient(model, policy, cfg) {
   // single Legend self-loop. Reverse grade/stack order is therefore exact.
   const order = model.states.map((s, i) => ({ s, i })).sort((a, b) => b.s.g - a.s.g || b.s.e - a.s.e || b.s.u - a.s.u);
   for (const { i } of order) {
-    const row = model.rows[i], acts = policy.decisions[i]; let attempts = 1, cost = row.cost, gross = 0, net = 0;
+    const row = model.rows[i], acts = policy.decisions[i]; let attempts = 1, cost = row.cost, gross = 0, net = 0, primeAttempts = 0, primeCost = 0;
     const byGrade = [0, 0, 0], final = [0, 0, 0]; byGrade[row.state.g] = 1;
     let exitMass = 0;
     let cursor = 0;
     for (const branch of row.branches) for (const o of branch.outcomes) if (o.p > 0) {
-      const action = acts[cursor++].action;
-      if (action === 'sell') {
+      const decision = acts[cursor++], action = decision.action;
+      if (action === 'sell' || action === 'prime') {
         exitMass += o.p;
-        gross += o.p * o.effectivePrice;
-        net += o.p * o.effectivePrice * (1 - cfg.fee);
+        gross += o.p * (action === 'prime' ? decision.prime.revenue : o.effectivePrice);
+        net += o.p * (action === 'prime' ? decision.prime.netRevenue : o.effectivePrice * (1 - cfg.fee));
+        if (action === 'prime') {
+          const addedAttempts = o.p * decision.prime.attempts, addedCost = o.p * decision.prime.cost;
+          primeAttempts += addedAttempts; primeCost += addedCost; attempts += addedAttempts; cost += addedCost; byGrade[2] += addedAttempts;
+        }
         final[branch.gradeIndex] += o.p;
       } else if (o.holdIndex === i) {
         // Analytically eliminated below using the directly accumulated exit mass.
@@ -432,6 +445,7 @@ function transient(model, policy, cfg) {
         exitMass += o.p;
         const next = result[o.holdIndex];
         attempts += o.p * next.attempts; cost += o.p * next.cost;
+        primeAttempts += o.p * next.primeAttempts; primeCost += o.p * next.primeCost;
         gross += o.p * next.gross; net += o.p * next.net;
         for (let g = 0; g < 3; g++) { byGrade[g] += o.p * next.byGrade[g]; final[g] += o.p * next.final[g]; }
       }
@@ -439,15 +453,18 @@ function transient(model, policy, cfg) {
     const escape = exitMass;
     if (escape > 0) {
       attempts /= escape; cost /= escape; gross /= escape; net /= escape;
+      primeAttempts /= escape; primeCost /= escape;
       for (let g = 0; g < 3; g++) { byGrade[g] /= escape; final[g] /= escape; }
-      result[i] = { attempts, cost, gross, net, byGrade, final };
-    } else result[i] = { attempts: Infinity, cost: Infinity, gross: Infinity, net: Infinity, byGrade: [Infinity, Infinity, Infinity], final: [0, 0, 0] };
+      result[i] = { attempts, cost, gross, net, primeAttempts, primeCost, byGrade, final };
+    } else result[i] = { attempts: Infinity, cost: Infinity, gross: Infinity, net: Infinity, primeAttempts: 0, primeCost: 0, byGrade: [Infinity, Infinity, Infinity], final: [0, 0, 0] };
   }
   const r = result[model.initial], possible = Number.isFinite(r.attempts);
   return {
     possible, ...(possible ? {} : { reason: '최적 정책에서 첫 판매에 도달하지 않습니다.' }),
     expectedRevenue: r.gross, expectedNetRevenue: r.net,
     expectedCost: r.cost, expectedAttempts: r.attempts,
+    expectedPrimeAttempts: r.primeAttempts, expectedPrimeCost: r.primeCost,
+    expectedRegularAttempts: r.attempts - r.primeAttempts,
     expectedProfit: possible ? r.net - r.cost - cfg.itemPrice : -Infinity,
     attemptsByGrade: Object.fromEntries(GRADES.map((g, i) => [g, r.byGrade[i]])),
     finalGrades: Object.fromEntries(GRADES.map((g, i) => [g, r.final[i]])),
@@ -455,7 +472,7 @@ function transient(model, policy, cfg) {
 }
 
 /** Optimize long-run net profit per reset with exact mutually-exclusive roll probabilities. */
-export function solveAdditionalTrade(input) {
+function solveOrdinaryAdditionalTrade(input) {
   const cfg = prepare(input), model = { ...buildModel(cfg), cfg };
   if (!model.reachableHasSale) {
     return { possible: false, reason: '등록된 가격 조건과 레전드리 하한가로 판매 가능한 결과가 없습니다.', current: null,
@@ -490,5 +507,81 @@ export function solveAdditionalTrade(input) {
     convergence: { converged: policy.converged, residual: policy.residual, iterations: policy.iterations,
       bellmanProfitPerReset: cfg.autoSell ? policy.gain * 2 * cfg.moneyScale : null },
     limits: ['등급별 확률 분포와 천장 스택은 재설정 결과에 따라 갱신합니다.', '판매 후 구매한 교체 장비는 설정한 시작 등급으로 진입하며 천장 스택은 유지합니다.'],
+  };
+}
+
+/** Optional Prime entry is compared against the full ordinary trading policy. */
+export function solveAdditionalTrade(input) {
+  let baseline = solveOrdinaryAdditionalTrade(input);
+  if (!input.prime?.on) return baseline;
+  const prime = input.prime;
+  finite(prime.cost, '프라임 에디셔널 큐브 가격');
+  if (typeof prime.fixedKey !== 'string' || !Array.isArray(prime.options) || !prime.options.length) throw new Error('프라임 고정 옵션 목록을 확인해 주세요.');
+  const requested = prime.fixedKey === 'auto' ? prime.options : prime.options.filter(option => option.key === prime.fixedKey);
+  if (!requested.length) throw new Error('고정할 첫 줄 옵션을 선택해 주세요.');
+  const cfg = prepare(input), model = { ...buildModel(cfg), cfg };
+  // Without any sale, finite pity forces ordinary resets into Legendary.
+  // Preserve the legacy off-mode DTO while using that actual recurrent gain
+  // for Prime comparisons rather than the minimum transient-grade cost.
+  if (!model.reachableHasSale) baseline = { ...baseline,
+    steady: { ...baseline.steady, profitPerReset: -cfg.costs.레전드리 }, profitPerReset: -cfg.costs.레전드리 };
+  const baselineValue = baseline.steady.profitPerReset;
+  let selected = baseline, best = null;
+  const candidates = requested.map(option => {
+    const prepared = prepareAdditionalTradePrime(cfg, prime, option);
+    const policy = optimizeAdditionalTradePrime(cfg, model, prepared, baselineValue);
+    let result = baseline;
+    if (policy) {
+      const steady = stationary(model, policy, cfg), current = transient(model, policy, cfg);
+      if (!close(steady.profitPerReset, policy.gain * 2 * cfg.moneyScale, 1e-7)) throw new Error('프라임 평균 이득과 장기 재설정 분포 계산이 일치하지 않습니다.');
+      result = { possible: current.possible && steady.possible, current, steady,
+        decisions: policy.decisions[model.initial], actionSummaries: policy.actionSummaries,
+        profitPerReset: steady.profitPerReset,
+        convergence: { converged: true, residual: policy.residual, iterations: policy.iterations, bellmanProfitPerReset: policy.gain * 2 * cfg.moneyScale }, limits: baseline.limits };
+    } else if ((cfg.autoSell || (!prepared.sellable && (cfg.startIndex > 0 || cfg.distributions.유니크.some(row => row.probability > 0 && row.effectivePrice === null))))
+      && prepared.eligible && -prime.cost > baselineValue + 1e-10 * cfg.moneyScale) {
+      // A cheaper Prime loop can be the true best recurrent class even when
+      // no finite sale policy improves it. Keep this boundary explicit rather
+      // than displaying an absorbing-session expectation that does not exist.
+      const reason = '최적 정책은 프라임 큐브를 계속 사용하고 판매하지 않아 매물당 기대값을 정의할 수 없습니다.';
+      result = { possible: false, reason,
+        current: { possible: false, reason, expectedAttempts: Infinity, expectedCost: Infinity, expectedRevenue: Infinity,
+          expectedNetRevenue: Infinity, expectedProfit: -Infinity, expectedPrimeAttempts: Infinity, expectedPrimeCost: prime.cost === 0 ? 0 : Infinity,
+          attemptsByGrade: Object.fromEntries(GRADES.map(grade => [grade, grade === '레전드리' ? Infinity : 0])),
+          finalGrades: Object.fromEntries(GRADES.map(grade => [grade, 0])) },
+        steady: { possible: false, reason, profitPerReset: -prime.cost, expectedPrimeAttempts: Infinity,
+          expectedPrimeCost: prime.cost === 0 ? 0 : Infinity }, profitPerReset: -prime.cost,
+        decisions: model.rows[model.initial].branches.flatMap(branch => branch.outcomes.filter(o => o.p > 0).map(o => ({
+          grade: GRADES[branch.gradeIndex], resultGrade: GRADES[branch.gradeIndex], sourceGrade: input.startGrade,
+          sourceStacks: { 에픽: cfg.stacks.에픽 ?? 0, 유니크: cfg.stacks.유니크 ?? 0 }, stacks: { 에픽: branch.e, 유니크: branch.u },
+          targetId: o.targetId, price: o.effectivePrice, probability: o.p, firstKey: o.firstKey,
+          action: branch.gradeIndex === 2 && o.firstKey === option.key ? 'prime' : 'hold' }))),
+        actionSummaries: model.rows.map(row => ({ grade: GRADES[row.state.g], stacks: { 에픽: row.state.e, 유니크: row.state.u },
+          sellProbability: 0, holdProbability: 1, primeProbability: 0, priceCutoffs: [] })),
+        fallback: { optimal: false, label: '판매하지 않는 프라임 정책 대신 일반 재설정 비교 기준을 표시합니다.',
+          current: baseline.fallback?.current ?? baseline.current, steady: baseline.fallback?.steady ?? baseline.steady },
+        convergence: { converged: true, residual: 0, iterations: 0, bellmanProfitPerReset: -prime.cost }, limits: baseline.limits,
+      };
+    }
+    const metric = result.steady.profitPerReset;
+    const candidate = { fixedKey: option.key, fixedLabel: option.label ?? option.key, objectiveValue: metric,
+      profitPerReset: metric, improvement: metric - baselineValue, expectedPrimeAttempts: result.steady.expectedPrimeAttempts ?? 0,
+      possible: result.possible, used: result !== baseline,
+    };
+    if (best === null || metric > best.objectiveValue) best = candidate;
+    if (metric > selected.steady.profitPerReset + 1e-10 * Math.max(1, cfg.moneyScale)) {
+      selected = { ...result, resolvedPrime: { ...prime, fixedKey: option.key, options: undefined } };
+    }
+    return candidate;
+  });
+  const used = selected !== baseline;
+  return { ...selected,
+    primeOptimization: { selectedFixedKey: used ? selected.resolvedPrime.fixedKey : null,
+      selectedFixedLabel: used ? candidates.find(candidate => candidate.fixedKey === selected.resolvedPrime.fixedKey).fixedLabel : null,
+      bestFixedKey: best?.fixedKey ?? null, bestFixedLabel: best?.fixedLabel ?? null,
+      objectiveValue: selected.steady.profitPerReset, baselineValue, improvement: selected.steady.profitPerReset - baselineValue,
+      candidates, reason: used ? (selected.possible ? 'selected' : 'non-selling') : 'no-benefit',
+      message: used ? (selected.possible ? '총 재설정 1회당 장기 기대 순이익이 가장 큰 고정 옵션을 선택했습니다.' : selected.reason)
+        : '프라임 진입이 장기 기대 순이익을 높이지 않아 일반 재설정을 유지합니다.' },
   };
 }

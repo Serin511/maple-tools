@@ -79,7 +79,7 @@ export function normalizePotentialSettings(value) {
     pityMode: choice(own(saved, 'pityMode'), ['single', 'campaign'], 'single'),
     primeOn: boolean(own(saved, 'primeOn'), false),
     primeCostEok: scalar(own(saved, 'primeCostEok'), '7'),
-    primeFixed: choice(own(saved, 'primeFixed'), primeKeys, 'STR'),
+    primeFixed: choice(own(saved, 'primeFixed'), ['auto', ...primeKeys], 'auto'),
   };
 }
 

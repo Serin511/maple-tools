@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { COST_DEFAULT, PART_LABELS, STATS, primeAtomList, atomLabel } from "./potential-engine.mjs";
 import { normalizePotentialSettings, normalizePotentialPresets, migratePotentialPrices as migratePrices } from "./potential-settings.mjs";
 import { preparePotentialConfig } from "./potential-calculator.mjs";
-import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, PresetControls, TradeEquipmentSettings, TradeResetCostSettings, ToggleField } from "./ui.jsx";
+import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, PresetControls, TradeEquipmentSettings, TradeResetCostSettings, ToggleField, PrimeCubeSettings } from "./ui.jsx";
 import { TradePriceEditor } from "./TradePriceEditor.jsx";
 import "./potential.css";
 
@@ -76,9 +76,9 @@ export default function App() {
   const [pityMode, setPityMode] = useState(initial?.pityMode ?? "single"); // 스택>0 표시 모드: single | campaign
   const [primeOn, setPrimeOn] = useState(!!initial?.primeOn);
   const [primeCostEok, setPrimeCostEok] = useState(initial?.primeCostEok ?? "7");
-  const [primeFixed, setPrimeFixed] = useState(initial?.primeFixed ?? "STR");
+  const [primeFixed, setPrimeFixed] = useState(initial?.primeFixed ?? "auto");
   const primeOpts = useMemo(() => primeAtomList(part, level), [part, level]);
-  useEffect(() => { if (!primeOpts.some((a) => a.key === primeFixed)) setPrimeFixed(primeOpts[0].key); }, [primeOpts, primeFixed]);
+  useEffect(() => { if (primeFixed !== 'auto' && !primeOpts.some((a) => a.key === primeFixed)) setPrimeFixed('auto'); }, [primeOpts, primeFixed]);
 
   function changeEquipment(patch) {
     if (Object.hasOwn(patch, 'itemPrice')) setItemPriceEok(mesoToEok(patch.itemPrice));
@@ -335,23 +335,11 @@ export default function App() {
               <Toggle on={miracle} set={setMiracle} label="미라클데이 (등급업 확률 ×2)" color="#f2c744" />
               <Toggle on={autoExclude} set={setAutoExclude} label="판매 재설정 자동 최적화" />
             </CalculatorCard>
-            <CalculatorCard as="div" style={{ background: C.panel, border: `1px solid ${primeOn ? C.prime + "66" : C.border}`, borderRadius: 14, padding: "var(--ui-card-padding, 22px)", display: "flex", flexDirection: "column", gap: 10 }}>
-              <Toggle on={primeOn} set={setPrimeOn} label="프라임 큐브 모드 (레전드리 1줄 고정)" color={C.prime} />
-              {primeOn && (
-                <>
-                  <label style={{ fontSize: 12, color: C.sub }}>프라임 큐브 가격 (억 메소 / 회)
-                    <Num value={primeCostEok} onChange={setPrimeCostEok} w="100%" /></label>
-                  <label style={{ fontSize: 12, color: C.sub }}>고정할 1줄 옵션
-                    <select value={primeFixed} onChange={(e) => setPrimeFixed(e.target.value)} style={inputStyle}>
-                      {primeOpts.map((a) => <option key={a.key} value={a.key}>{atomLabel(a)}</option>)}
-                    </select></label>
-                  <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.5 }}>
-                    레전 도달 후 일반 재설정으로 1줄에 이 옵션이 뜨면 프라임으로 전환(2·3줄만 재설정, 기존/신규 중 선택 적용).
-                    유효 옵션이 먼저 뜨면 판매 — 둘 다 해당하면 판매가와 프라임 계속 가치 중 큰 쪽을 택해요.
-                  </div>
-                </>
-              )}
-            </CalculatorCard>
+            <PrimeCubeSettings prime={{ on: primeOn, cost: eokToMeso(primeCostEok), fixedKey: primeFixed }}
+              onChange={prime => { setPrimeOn(prime.on); setPrimeCostEok(mesoToEok(prime.cost)); setPrimeFixed(prime.fixedKey); }}
+              options={primeOpts.map(atom => ({ key: atom.key, label: atomLabel(atom) }))}
+              description="레전드리에서 일반 재설정으로 고정할 첫 줄이 나오면 프라임으로 전환합니다. 나머지 두 줄만 재설정하고, 이전·신규 옵션 중 더 유리한 결과를 선택합니다."
+              optimization={eng?.primeOptimization} />
             <CalculatorCard as="div" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <h2>입력 프리셋</h2>
               <PresetControls names={Object.keys(presets)} presetName={presetName} setPresetName={setPresetName}
@@ -530,7 +518,7 @@ export default function App() {
                     )}
                   </div>
                 )}
-                {primeOn && eng.legMode !== "P" && (
+                {primeOn && eng.legMode !== "P" && !eng.primeOptimization && (
                   <div style={{ background: "rgba(242,199,68,.08)", border: `1px solid rgba(242,199,68,.4)`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: C.unique }}>
                     프라임 모드가 켜져 있지만 레전드리 타겟이 없어 프라임 단계를 계산하지 않았어요 (레전드리 매물 가격을 입력하세요).
                   </div>

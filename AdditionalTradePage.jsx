@@ -1,4 +1,4 @@
-import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, NumericField, CharacterEfficiencySettings, PresetControls, TradeEquipmentSettings, TradeResetCostSettings, ToggleField } from './ui.jsx';
+import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, NumericField, CharacterEfficiencySettings, PresetControls, TradeEquipmentSettings, TradeResetCostSettings, ToggleField, PrimeCubeSettings } from './ui.jsx';
 import { TradePriceEditor } from './TradePriceEditor.jsx';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -7,6 +7,7 @@ import {
 } from './additional-trade-calculator.mjs';
 import { resetAdditionalCosts } from './additional-calculator.mjs';
 import { ADDITIONAL_GRADES, ADDITIONAL_SLOTS, ADDITIONAL_LEVELS } from './additional-data.mjs';
+import { listAdditionalPrimeOptions, normalizeAdditionalPrime } from './additional-prime.mjs';
 import './flame.css';
 import './additional-trade.css';
 
@@ -48,13 +49,14 @@ function normalizeSettings(saved) {
   const priceBanks = Object.fromEntries(Object.entries(storedBanks)
     .filter(([, bank]) => bank && typeof bank === 'object' && !Array.isArray(bank))
     .map(([key, bank]) => [key, Object.fromEntries(['shared', ...ADDITIONAL_GRADES].map(grade => [grade, cleanPriceRows(bank[grade])]))]));
-  return {
+  const normalized = {
     ...defaults, ...saved,
     efficiency: { ...defaults.efficiency, ...record(saved.efficiency) },
     costs: { ...defaults.costs, ...record(saved.costs) },
     upRates: { ...defaults.upRates }, pity: { ...defaults.pity },
     stacks: { ...defaults.stacks, ...record(saved.stacks) }, prices, priceBanks,
   };
+  return { ...normalized, prime: normalizeAdditionalPrime(normalized) };
 }
 function loadSettings() { return normalizeSettings(readJSON(SAVE_KEY, null)); }
 function loadPresets() {
@@ -101,6 +103,8 @@ function ResultSummary({ result, settings }) {
       <div><span>매입가 포함 순이익 · 현재 매물당</span><b>{meso(current?.expectedProfit)}</b></div>
       <div><span>매입가 포함 순이익 · 장기 매물당</span><b>{meso(steady?.expectedProfit)}</b></div>
       <div><span>순이익 · 장기 재설정 1회당</span><b>{meso(steady?.profitPerReset)}</b></div>
+      {settings.prime.on && <><div><span>프라임 기대 횟수 · 현재 매물당</span><b>{number(current?.expectedPrimeAttempts || 0)}회</b></div>
+        <div><span>프라임 기대 비용 · 현재 매물당</span><b>{meso(current?.expectedPrimeCost || 0)}</b></div></>}
     </div>
     {current?.attemptsByGrade && <div className="at-grade-table"><h3>등급별 기대 재설정 횟수</h3><div>{ADDITIONAL_GRADES.map(grade => <span key={grade}>{grade}<b>{number(current.attemptsByGrade[grade] || 0)}회</b></span>)}</div></div>}
     {current?.finalGrades && <div className="at-grade-table"><h3>판매 시점 등급 비중</h3><div>{ADDITIONAL_GRADES.map(grade => <span key={grade}>{grade}<b>{probabilityPercent(current.finalGrades[grade] || 0)}</b></span>)}</div></div>}
@@ -133,8 +137,10 @@ function TradeDecisions({ decisions, priceRows, summaries = [], settings }) {
       {settings.startGrade === '에픽' && grade === '에픽' && <label>에픽 스택<Numeric label="행동을 확인할 에픽 스택" value={epicStack} step="1" max={settings.pity.에픽} unit="회" onChange={setEpicStack} /></label>}
       {settings.startGrade !== '레전드리' && grade !== '레전드리' && <label>유니크 스택<Numeric label="행동을 확인할 유니크 스택" value={uniqueStack} step="1" max={settings.pity.유니크} unit="회" onChange={setUniqueStack} /></label>}
     </div>
-    {!!outcomes.length ? <div className="flame-table-scroll"><table><thead><tr><th>결과 등급</th><th>행동</th><th>판매 조건</th><th>가격</th><th>결과 확률</th></tr></thead><tbody>{outcomes.map((row, index) => <tr key={index}><td>{row.grade}</td><td>{row.action === 'sell' ? '판매' : '계속 재설정'}</td><td>{priceRows.find(item => item.id === row.targetId && item.grade.startsWith(row.grade))?.label || (row.action === 'sell' ? '레전드리 잡옵 처분가' : '가격 조건 미달')}</td><td>{row.price == null ? '—' : meso(row.price)}</td><td>{probabilityPercent(row.probability)}</td></tr>)}</tbody></table></div>
-    : selectedSummary ? <><div className="at-grade-table"><div><span>판매 선택 확률<b>{probabilityPercent(selectedSummary.sellProbability)}</b></span><span>계속 재설정 선택 확률<b>{probabilityPercent(selectedSummary.holdProbability)}</b></span></div></div><details className="at-stack-details"><summary>결과 등급별 가격 문턱</summary><div className="flame-table-scroll"><table><thead><tr><th>결과 등급</th><th>자동 판매 가격 문턱</th><th>해당 결과 확률</th></tr></thead><tbody>{selectedSummary.priceCutoffs?.map((row, index) => <tr key={`${row.resultGrade}-${index}`}><td>{row.resultGrade}</td><td>{row.comparison === 'always' ? '등록된 가격이면 판매' : row.comparison === 'never' ? '계속 재설정' : row.sellPriceCutoff == null ? '가격 조건에 따라 결정' : `${row.comparison === '>' ? '초과' : '이상'} ${meso(row.sellPriceCutoff)}`}</td><td>{reachability(row.probabilityMass)}</td></tr>)}</tbody></table></div></details></>
+    {!!outcomes.length ? <div className="flame-table-scroll"><table><thead><tr><th>결과 등급</th><th>행동</th><th>판매 조건</th><th>가격</th><th>결과 확률</th></tr></thead><tbody>{outcomes.map((row, index) => <tr key={index}><td>{row.grade}</td><td>{row.action === 'sell' ? '판매' : row.action === 'prime' ? '프라임 진입' : '계속 재설정'}</td><td>{priceRows.find(item => item.id === row.targetId && item.grade.startsWith(row.grade))?.label || (row.action === 'sell' ? '레전드리 잡옵 처분가' : row.action === 'prime' ? '고정 옵션 획득' : '가격 조건 미달')}</td><td>{row.price == null ? '—' : meso(row.price)}</td><td>{probabilityPercent(row.probability)}</td></tr>)}</tbody></table></div>
+    : selectedSummary ? <><div className="at-grade-table"><div><span>{settings.prime.on ? '판매 완료·프라임 진입 확률' : '판매 선택 확률'}<b>{probabilityPercent(selectedSummary.sellProbability)}</b></span><span>계속 재설정 선택 확률<b>{probabilityPercent(selectedSummary.holdProbability)}</b></span>
+      {settings.prime.on && <span>프라임 진입 확률<b>{probabilityPercent(selectedSummary.primeProbability || 0)}</b></span>}
+    </div></div><details className="at-stack-details"><summary>결과 등급별 가격 문턱</summary><div className="flame-table-scroll"><table><thead><tr><th>결과 등급</th><th>자동 판매 가격 문턱</th><th>해당 결과 확률</th></tr></thead><tbody>{selectedSummary.priceCutoffs?.map((row, index) => <tr key={`${row.resultGrade}-${index}`}><td>{row.resultGrade}</td><td>{row.comparison === 'always' ? '등록된 가격이면 판매' : row.comparison === 'never' ? '계속 재설정' : row.sellPriceCutoff == null ? '가격 조건에 따라 결정' : `${row.comparison === '>' ? '초과' : '이상'} ${meso(row.sellPriceCutoff)}`}</td><td>{reachability(row.probabilityMass)}</td></tr>)}</tbody></table></div></details></>
       : <p className="at-note">선택한 등급·천장 스택의 요약이 없습니다.</p>}
   </div>;
 }
@@ -166,13 +172,13 @@ export default function AdditionalTradePage() {
     const separateCrit = patch.separateCrit ?? settings.separateCrit;
     const key = priceBankKey(slot, separateCrit);
     const nextPrices = banks[key] || emptyPriceLists();
-    change({ ...patch, prices: nextPrices, priceBanks: banks });
+    change({ ...patch, prices: nextPrices, priceBanks: banks, prime: normalizeAdditionalPrime({ ...settings, ...patch }) });
   }
   function changeEquipment(patch) {
     const { part, ...values } = patch;
     if (Object.hasOwn(values, 'level')) values.costs = resetAdditionalCosts(values.level);
     if (Object.hasOwn(patch, 'part')) changePriceScope({ ...values, slot: part });
-    else change(values);
+    else change({ ...values, ...(Object.hasOwn(values, 'level') ? { prime: normalizeAdditionalPrime({ ...settings, ...values }) } : {}) });
   }
   function changeNested(key, name, value) { change({ [key]: { ...settings[key], [name]: value } }); }
   function listFor(grade) { return settings.prices[settings.separateGrades ? grade : 'shared'] || []; }
@@ -230,6 +236,12 @@ export default function AdditionalTradePage() {
             label="판매·재설정 자동 최적화"
             description="켜면 다음 재설정 결과마다 기대 순이익이 높은 행동을 선택합니다. 끄면 가격 조건에 맞는 즉시 판매합니다." />
         </CalculatorCard>
+
+        <PrimeCubeSettings prime={settings.prime} onChange={prime => change({ prime })}
+          label="프라임 에디셔널 큐브 모드 (레전드리 1줄 고정)"
+          priceLabel="프라임 에디셔널 큐브 가격 (억 메소 / 회)"
+          options={listAdditionalPrimeOptions(settings)} optimization={result?.primeOptimization}
+          description="레전드리에서 일반 재설정으로 고정할 첫 줄이 나오면 프라임으로 전환합니다. 나머지 두 줄을 재설정하고, 이전·신규 옵션 중 더 유리한 결과를 선택합니다." />
 
         <CalculatorCard as="div" className="flame-card">
           <CharacterEfficiencySettings settings={settings} onChange={change}

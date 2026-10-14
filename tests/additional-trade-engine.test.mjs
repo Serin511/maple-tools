@@ -231,3 +231,132 @@ test('starting at Unique or Legendary validates and uses only reachable grades',
   const legendary = solveAdditionalTrade(cfg());
   close(legendary.current.expectedAttempts, 1);
 });
+
+const primeOption = (key, rows) => ({ key, label: `${key} 고정`, distribution: dist(...rows) });
+function primeConfig(overrides = {}) {
+  return cfg({ itemPrice: 0, costs: { 레전드리: 10 }, autoSell: true,
+    distributions: { 레전드리: [{ price: null, probability: .8, firstKey: 'A' }, { price: 100, probability: .2, firstKey: 'A' }] },
+    prime: { on: true, cost: 5, fixedKey: 'auto', options: [primeOption('A', [[null, .8], [100, .2]])] }, ...overrides });
+}
+
+test('Prime entry has no extra fee and geometric redraws count in the full reset denominator', () => {
+  const result = solveAdditionalTrade(primeConfig());
+  close(result.current.expectedAttempts, 5); // 1 normal + .8 * 5 Prime
+  close(result.current.expectedPrimeAttempts, 4);
+  close(result.current.expectedPrimeCost, 20);
+  close(result.current.expectedCost, 30);
+  close(result.current.expectedProfit, 70);
+  close(result.steady.profitPerReset, 14);
+  close(result.convergence.bellmanProfitPerReset, 14);
+  assert.deepEqual(result.decisions.map(row => row.action), ['prime', 'sell']);
+  close(result.actionSummaries[0].primeProbability, .8);
+});
+
+test('Prime eligibility retains first-line identity even when sale prices coincide', () => {
+  const result = solveAdditionalTrade(primeConfig({ distributions: { 레전드리: [
+    { price: null, probability: .1, firstKey: 'A' },
+    { price: null, probability: .8, firstKey: 'B' },
+    { price: 100, probability: .1, firstKey: 'B' },
+  ] } }));
+  assert.deepEqual(result.decisions.map(row => row.action), ['prime', 'hold', 'sell']);
+  // Sale/Prime entry occurs with mass .2. Half of sold items use five Prime
+  // redraws, while the ordinary waiting time is exactly five resets.
+  close(result.current.expectedRegularAttempts, 5);
+  close(result.current.expectedPrimeAttempts, 2.5);
+  close(result.current.expectedAttempts, 7.5);
+  close(result.current.expectedCost, 62.5);
+  close(result.steady.profitPerReset, 5);
+});
+
+test('Prime costs and proceeds include fee and exactly one replacement purchase', () => {
+  const result = solveAdditionalTrade(primeConfig({ itemPrice: 2, fee: 10 }));
+  close(result.current.expectedNetRevenue, 90);
+  close(result.current.expectedCost, 30);
+  close(result.current.expectedProfit, 58);
+  close(result.steady.profitPerReset, 11.6);
+});
+
+test('automatic fixed-line selection maximizes whole-trade profit rather than conditional Prime yield', () => {
+  const input = primeConfig({ distributions: { 레전드리: [
+    { price: null, probability: .1, firstKey: 'A' },
+    { price: null, probability: .8, firstKey: 'B' },
+    { price: 100, probability: .1, firstKey: 'C' },
+  ] }, prime: { on: true, cost: 1, fixedKey: 'auto', options: [
+    primeOption('A', [[100, 1]]), primeOption('B', [[null, .5], [100, .5]]),
+  ] } });
+  const auto = solveAdditionalTrade(input);
+  const candidates = ['A', 'B'].map(fixedKey => solveAdditionalTrade({ ...input, prime: { ...input.prime, fixedKey } }));
+  assert.equal(auto.primeOptimization.selectedFixedKey, 'B');
+  close(auto.steady.profitPerReset, Math.max(...candidates.map(result => result.steady.profitPerReset)));
+  assert.ok(candidates[0].steady.profitPerReset < candidates[1].steady.profitPerReset);
+  assert.ok(auto.primeOptimization.objectiveValue >= auto.primeOptimization.baselineValue);
+});
+
+test('high Prime prices retain the baseline policy and zero-probability entry stays disabled', () => {
+  const input = primeConfig(), ordinary = solveAdditionalTrade({ ...input, prime: { on: false } });
+  const expensive = solveAdditionalTrade({ ...input, prime: { ...input.prime, cost: 1e12 } });
+  close(expensive.steady.profitPerReset, ordinary.steady.profitPerReset);
+  assert.equal(expensive.primeOptimization.selectedFixedKey, null);
+  close(expensive.current.expectedPrimeAttempts, 0);
+  const absent = solveAdditionalTrade({ ...input, distributions: { 레전드리: [{ price: 100, probability: 1, firstKey: 'B' }] } });
+  assert.equal(absent.primeOptimization.selectedFixedKey, null);
+});
+
+test('manual selling stops immediately on a registered price both before and during Prime use', () => {
+  const input = primeConfig({ autoSell: false, distributions: { 레전드리: [
+    { price: 5, probability: .1, firstKey: 'A' }, { price: null, probability: .8, firstKey: 'A' }, { price: 100, probability: .1, firstKey: 'A' },
+  ] }, prime: { on: true, cost: 1, fixedKey: 'A', options: [primeOption('A', [[5, .5], [100, .5]])] } });
+  const result = solveAdditionalTrade(input);
+  assert.deepEqual(result.decisions.map(row => row.action), ['sell', 'prime', 'sell']);
+  close(result.current.expectedPrimeAttempts, .8);
+  close(result.current.expectedRevenue, .1 * 5 + .1 * 100 + .8 * 52.5);
+});
+
+test('forced manual selling can optimize a finite loss-making Prime cycle below minus Prime cost', () => {
+  const input = primeConfig({ autoSell: false, itemPrice: 200, distributions: { 레전드리: [
+    { price: 1, probability: .5, firstKey: 'B' }, { price: null, probability: .5, firstKey: 'A' },
+  ] }, prime: { on: true, cost: 1, fixedKey: 'A', options: [primeOption('A', [[1, .001], [null, .999]])] } });
+  const result = solveAdditionalTrade(input);
+  assert.equal(result.possible, true);
+  close(result.current.expectedPrimeAttempts, 500);
+  close(result.current.expectedAttempts, 501);
+  close(result.current.expectedProfit, -709);
+  close(result.steady.profitPerReset, -709 / 501);
+  assert.deepEqual(result.decisions.map(row => row.action), ['sell', 'prime']);
+});
+
+test('cheaper infinite Prime policy remains an explicit impossible sale, including zero cost', () => {
+  for (const cost of [1, 0]) {
+    const input = primeConfig({ itemPrice: 200, distributions: { 레전드리: [{ price: 1, probability: 1, firstKey: 'A' }] },
+      prime: { on: true, cost, fixedKey: 'A', options: [primeOption('A', [[1, 1]])] } });
+    const result = solveAdditionalTrade(input);
+    assert.equal(result.possible, false);
+    assert.equal(result.current.possible, false);
+    assert.equal(result.steady.possible, false);
+    close(result.steady.profitPerReset, -cost);
+    assert.equal(result.current.expectedPrimeAttempts, Infinity);
+    assert.match(result.reason, /판매하지 않아/);
+    assert.ok(result.fallback);
+  }
+});
+
+test('no-target Prime compares against the recurrent Legendary cost rather than a cheaper transient grade', () => {
+  const input = { startGrade: '에픽', itemPrice: 0, fee: 0, floorPrice: 0, autoSell: true,
+    distributions: { 에픽: dist([null]), 유니크: dist([null]), 레전드리: [{ price: null, probability: 1, firstKey: 'A' }] },
+    costs: { 에픽: 1, 유니크: 2, 레전드리: 10 }, upRates: { 에픽: 0, 유니크: 0 },
+    pity: { 에픽: 0, 유니크: 0 }, stacks: { 에픽: 0, 유니크: 0 },
+    prime: { on: true, cost: 5, fixedKey: 'A', options: [primeOption('A', [[null, 1]])] } };
+  const result = solveAdditionalTrade(input);
+  assert.equal(result.possible, false);
+  close(result.primeOptimization.baselineValue, -10);
+  close(result.steady.profitPerReset, -5);
+  assert.equal(result.primeOptimization.reason, 'non-selling');
+});
+
+test('Prime off preserves every existing multichain field and ignores inactive Prime settings', () => {
+  const input = { startGrade: '에픽', itemPrice: 3, fee: 0, floorPrice: 0, autoSell: true,
+    distributions: { 에픽: dist([10]), 유니크: dist([20]), 레전드리: dist([null]) },
+    costs: { 에픽: 1, 유니크: 2, 레전드리: 3 }, upRates: { 에픽: 0, 유니크: 0 },
+    pity: { 에픽: 0, 유니크: 0 }, stacks: { 에픽: 0, 유니크: 0 } };
+  assert.deepEqual(solveAdditionalTrade({ ...input, prime: { on: false, cost: -1, fixedKey: 'invalid' } }), solveAdditionalTrade(input));
+});

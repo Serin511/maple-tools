@@ -233,3 +233,47 @@ test('a negative automatic-sale policy keeps the item and exposes an explicit se
   close(result.fallback.current.expectedProfit, -910);
   assert.match(result.reason, /판매하지 않아/);
 });
+
+test('real-table Prime auto compares every possible first line and retains the winning fixed-line identity', () => {
+  const input = settings();
+  input.startGrade = '레전드리'; input.itemPrice = 0; input.fee = 0;
+  input.prices.shared = [price('str-19', 'STR', 19, 1e12)];
+  input.costs.레전드리 = 1e8;
+  input.prime = { on: true, cost: 1, fixedKey: 'auto' };
+  const result = calculateAdditionalTrade(input);
+  assert.equal(result.primeOptimization.selectedFixedKey, 'STR +8%');
+  assert.equal(result.primeOptimization.reason, 'selected');
+  assert.ok(result.current.expectedPrimeAttempts > 0);
+  assert.ok(result.primeOptimization.candidates.length > 10);
+  close(result.steady.profitPerReset, Math.max(...result.primeOptimization.candidates.map(candidate => candidate.objectiveValue)));
+  close(result.steady.profitPerReset, result.current.expectedProfit / result.current.expectedAttempts);
+  assert.ok(result.distributions.레전드리.every(row => typeof row.firstKey === 'string'));
+  assert.ok(result.decisions.filter(row => row.action === 'prime').every(row => row.firstKey === result.primeOptimization.selectedFixedKey));
+  // Equal-price rolls from different first lines remain separate entry events.
+  assert.ok(result.distributions.레전드리.filter(row => row.price === null).length > 1);
+  assert.match(result.warnings.at(-1), /일반 에디셔널 레전드리 확률표/);
+});
+
+test('Prime uses Legendary price banks and keeps the ordinary off-mode distributions unchanged', () => {
+  const input = settings(); input.startGrade = '레전드리'; input.itemPrice = 0; input.fee = 0;
+  input.costs.레전드리 = 100; input.prices.shared = [price('shared', 'STR', 0, 1e5)];
+  const ordinary = calculateAdditionalTrade(input);
+  const inactive = calculateAdditionalTrade({ ...input, prime: { on: false, cost: -1, fixedKey: 'invalid' } });
+  assert.deepEqual(inactive, ordinary);
+  input.separateGrades = true;
+  input.prices.레전드리 = [price('legend', 'STR', 19, 1e10)];
+  input.prices.에픽 = [price('epic', 'STR', 0, 1e16)];
+  input.prime = { on: true, cost: 1, fixedKey: 'STR +8%' };
+  const result = calculateAdditionalTrade(input);
+  close(result.current.expectedRevenue, 1e10);
+  assert.ok(result.current.expectedPrimeAttempts > 0);
+  assert.ok(result.distributions.레전드리.filter(row => row.price !== null).every(row => row.price === 1e10));
+});
+
+test('Prime defaults to fourteen hundred million and rejects invalid active costs and fixed options', () => {
+  const input = settings();
+  assert.deepEqual(input.prime, { on: false, cost: 1.4e9, fixedKey: 'auto' });
+  for (const prime of [{ on: true, cost: -1, fixedKey: 'auto' }, { on: true, cost: 1, fixedKey: 'missing' }]) {
+    assert.throws(() => calculateAdditionalTrade({ ...input, prime }), /프라임|첫 줄/);
+  }
+});

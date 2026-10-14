@@ -28,8 +28,11 @@ export function preparePotentialConfig(input) {
 const transferableEngine = ({ round, roundDist, ...engine }) => engine;
 
 export function calculatePotentialStrategy(input, { simulation = {} } = {}) {
-  const cfg = preparePotentialConfig(input);
-  const eng = solveEngine(cfg);
+  const requestedCfg = preparePotentialConfig(input);
+  const eng = solveEngine(requestedCfg);
+  // Simulation must follow the actual selected policy and its real cube cost,
+  // including the no-Prime fallback when automatic selection finds no benefit.
+  const cfg = eng.resolvedPrime ? { ...requestedCfg, prime: eng.resolvedPrime } : requestedCfg;
   const base = input.primeOn ? solveEngine({ ...cfg, prime: { on: false } }) : null;
   const j0 = numeric(input.pity, '유→레 천장 스택', { max: PITY.unique, integer: true });
   const first = eng.round(j0);

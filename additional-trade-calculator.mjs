@@ -4,6 +4,7 @@ import {
 } from './additional-data.mjs';
 import { resetAdditionalCosts } from './additional-calculator.mjs';
 import { solveAdditionalTrade } from './additional-trade-engine.mjs';
+import { DEFAULT_ADDITIONAL_PRIME, getAdditionalPrimeLines, listAdditionalPrimeOptions } from './additional-prime.mjs';
 
 const TRADE_GRADES = ADDITIONAL_GRADES;
 const SUBSTATS = ADDITIONAL_SUBSTATS;
@@ -20,6 +21,7 @@ export const DEFAULT_ADDITIONAL_TRADE_SETTINGS = Object.freeze({
   costs: resetAdditionalCosts(200),
   upRates: { 에픽: 0.009804, 유니크: 0.007 },
   pity: { 에픽: 152, 유니크: 214 }, stacks: { 에픽: 0, 유니크: 0 },
+  prime: { ...DEFAULT_ADDITIONAL_PRIME },
 });
 
 function invalid(message) { throw new Error(message); }
@@ -65,6 +67,12 @@ export function validateAdditionalTradeSettings(settings) {
   for (const key of ['itemPrice', 'floorPrice']) nonnegative(s[key], key === 'itemPrice' ? '매입가' : '레전드리 최소 처분가');
   if (!finite(s.fee, 100)) invalid('경매장 수수료율은 0~100%로 입력해 주세요.');
   for (const k of ['miracle', 'autoSell', 'separateGrades', 'separateCrit']) if (typeof s[k] !== 'boolean') invalid('재설정 규칙 토글을 확인해 주세요.');
+  const prime = { ...DEFAULT_ADDITIONAL_PRIME, ...s.prime };
+  if (typeof prime.on !== 'boolean') invalid('프라임 에디셔널 큐브 모드를 확인해 주세요.');
+  if (prime.on) {
+    nonnegative(prime.cost, '프라임 에디셔널 큐브 가격');
+    if (prime.fixedKey !== 'auto' && !listAdditionalPrimeOptions(s).some(option => option.key === prime.fixedKey)) invalid('고정할 첫 줄 옵션을 선택해 주세요.');
+  }
   if (!s.prices || typeof s.prices !== 'object') invalid('가격 조건을 확인해 주세요.');
   for (const [, rows] of activePriceLists(s)) validateRows(rows, '활성');
   const activeRows = activePriceLists(s).flatMap(([, rows]) => rows).filter(row => row?.price !== '');
@@ -146,8 +154,8 @@ export function additionalTradeScore(options, settings = DEFAULT_ADDITIONAL_TRAD
   return { scores: totals, cd, crit: s.slot === '장갑' && s.separateCrit ? crit : 0 };
 }
 
-function distributionForGrade(settings, grade) {
-  const lines = getAdditionalLines({ method: 'reset', grade, slot: settings.slot, level: settings.level });
+function distributionForGrade(settings, grade, fixedKey = null) {
+  const lines = fixedKey === null ? getAdditionalLines({ method: 'reset', grade, slot: settings.slot, level: settings.level }) : getAdditionalPrimeLines(settings, fixedKey);
   if (!lines) invalid(`${grade} ${settings.slot} 확률표가 없습니다.`);
   const cachedLines = lines.map(line => line.map(row => ({ ...row, detail: optionScores(row.label, settings) })));
   const priceRowsForGrade = priceRows(settings, grade);
@@ -160,10 +168,12 @@ function distributionForGrade(settings, grade) {
     const { winner, eligibleIds } = classifyAdditionalTradeOutcome(priceRowsForGrade, totals, cd, crit);
     for (const id of eligibleIds) rowProbabilities.set(id, (rowProbabilities.get(id) ?? 0) + probability);
     const targetId = winner?.id ?? null, price = winner ? Number(winner.price) : null;
-    const signature = JSON.stringify([price, targetId]);
+    // Equal sale prices can still have different Prime entry eligibility.
+    const firstKey = grade === '레전드리' && settings.prime?.on ? a.label : undefined;
+    const signature = JSON.stringify([price, targetId, firstKey]);
     const previous = results.get(signature);
     if (previous) previous.probability += probability;
-    else results.set(signature, { price, probability, targetId });
+    else results.set(signature, { price, probability, targetId, ...(firstKey === undefined ? {} : { firstKey }) });
   }
   const rows = [...results.values()];
   const mass = rows.reduce((sum, row) => sum + row.probability, 0);
@@ -191,7 +201,7 @@ function priceRowSummaries(settings, distributions, rowProbabilities) {
 
 export function calculateAdditionalTrade(settings) {
   validateAdditionalTradeSettings(settings);
-  const s = { ...DEFAULT_ADDITIONAL_TRADE_SETTINGS, ...settings, efficiency: cleanEfficiency(settings.efficiency, settings) };
+  const s = { ...DEFAULT_ADDITIONAL_TRADE_SETTINGS, ...settings, efficiency: cleanEfficiency(settings.efficiency, settings), prime: { ...DEFAULT_ADDITIONAL_PRIME, ...settings.prime } };
   const distributions = {};
   const rowProbabilities = {};
   for (const grade of TRADE_GRADES.slice(TRADE_GRADES.indexOf(s.startGrade))) {
@@ -201,7 +211,10 @@ export function calculateAdditionalTrade(settings) {
     for (const outcome of generated.distribution) if (outcome.targetId) winning.set(outcome.targetId, (winning.get(outcome.targetId) ?? 0) + outcome.probability);
     rowProbabilities[grade] = { total: generated.rowProbabilities, winning };
   }
-  const engineResult = solveAdditionalTrade({ ...s, distributions });
+  const options = s.prime.on ? listAdditionalPrimeOptions(s).filter(option => s.prime.fixedKey === 'auto' || option.key === s.prime.fixedKey).map(option => ({
+    ...option, distribution: distributionForGrade(s, '레전드리', option.key).distribution,
+  })) : [];
+  const engineResult = solveAdditionalTrade({ ...s, distributions, prime: { ...s.prime, options } });
   return {
     ...engineResult,
     distributions,
@@ -211,6 +224,7 @@ export function calculateAdditionalTrade(settings) {
       '스탯별 옵션은 같은 3줄 결과 안에서 함께 계산합니다. 여러 판매 조건에 맞아도 가장 높은 판매가 한 건만 적용합니다.',
       '아이템 드롭률·메소 획득량·HP 옵션은 가치 계산에서 제외했습니다. 제논·데몬어벤져 전용 가격 조건은 지원하지 않습니다.',
       '공개된 줄별 확률의 반올림 오차를 정규화해 결합합니다. 직전 결과 재등장 제한은 반영하지 않습니다.',
+      ...(s.prime.on ? ['프라임 에디셔널 큐브는 첫 줄을 고정하고 이전·새 세 줄 중 하나를 보존합니다. 둘째·셋째 줄은 보존된 일반 에디셔널 레전드리 확률표를 재사용하는 모델 가정입니다.'] : []),
     ],
   };
 }

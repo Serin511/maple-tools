@@ -78,6 +78,37 @@ test('full Prime and baseline result crosses a structured-clone worker boundary 
   assert.ok(Number.isFinite(result.mc.avgProfit));
 });
 
+test('automatic Prime resolves the actual worker config and preserves seeded simulation of the chosen manual policy', () => {
+  const input = settings({ part: 'glove', targetsU: [],
+    targetsL: [{ id: 'crit24', kind: 'glove', crit: 24, statMin: 0, price: 1e6 }],
+    pity: '0', floorEok: '0', primeOn: true, primeCostEok: '0.0000001', primeFixed: 'auto', autoExclude: true });
+  const before = structuredClone(input), options = { simulation: { seed: 42 } };
+  const automatic = calculatePotentialStrategy(input, options);
+  const manual = calculatePotentialStrategy({ ...input, primeFixed: 'CRIT' }, options);
+  assert.equal(automatic.cfg.prime.fixedKey, 'CRIT');
+  assert.equal(automatic.cfg.prime.on, true);
+  assert.equal(automatic.cfg.prime.cost, 10);
+  assert.equal(automatic.eng.primeOptimization.selectedFixedKey, 'CRIT');
+  assert.deepEqual(automatic.eng.steady, manual.eng.steady);
+  assert.deepEqual(automatic.first, manual.first);
+  assert.deepEqual(automatic.mc, manual.mc);
+  assert.deepEqual(structuredClone(automatic), automatic);
+  assert.deepEqual(input, before);
+});
+
+test('automatic Prime falls back to the no-Prime policy and simulation when cube cost cannot help', () => {
+  const input = settings({ targetsU: [], targetsL: [{ id: 'str36', kind: 'stat', stat: 'STR', min: 36, price: 1e6 }],
+    pity: '0', floorEok: '0', primeOn: true, primeCostEok: '10000', primeFixed: 'auto', autoExclude: true });
+  const automatic = calculatePotentialStrategy(input, { simulation: { seed: 17 } });
+  const baseline = calculatePotentialStrategy({ ...input, primeOn: false }, { simulation: { seed: 17 } });
+  assert.equal(automatic.cfg.prime.on, false);
+  assert.equal(automatic.eng.primeOptimization.selectedFixedKey, null);
+  assert.equal(automatic.eng.primeOptimization.reason, 'no-benefit');
+  assert.deepEqual(automatic.eng.steady, baseline.eng.steady);
+  assert.deepEqual(automatic.mc, baseline.mc);
+  assert.deepEqual(structuredClone(automatic), automatic);
+});
+
 test('simulation budget errors preserve the exact solution and report an optional warning', () => {
   const input = settings(), result = calculatePotentialStrategy(input, { simulation: { maxRounds: 1 } });
   const engine = solveEngine(preparePotentialConfig(input));

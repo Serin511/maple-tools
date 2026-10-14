@@ -66,6 +66,7 @@ function makeTinyModel(cfg) {
         const sellIndex = indexOf(start, branch.e, branch.u);
         choices.push({
           p: branch.p * outcome.probability,
+          firstKey: outcome.firstKey, price,
           holdIndex, sellIndex, saleCash,
           rewardHold: -cfg.costs[GRADES[state.g]],
           rewardSell: -cfg.costs[GRADES[state.g]] + saleCash,
@@ -204,6 +205,81 @@ function enumerateOracle(input) {
   }
   return { best, bestMask, policyCount };
 }
+
+// An independent full Markov oracle keeps actual Prime reset states. It does
+// not use the production absorbing-session formulas or gain root solver.
+function enumeratePrimeOracle(cfg) {
+  const model = makeTinyModel(cfg), option = cfg.prime.options[0], primeCost = cfg.prime.cost;
+  const prices = [...new Set([null, ...option.distribution.map(row => row.price), ...cfg.distributions.레전드리.map(row => row.price)])]
+    .sort((a, b) => (a ?? -Infinity) - (b ?? -Infinity));
+  const primeIndex = new Map(prices.map((price, index) => [price, model.states.length + index]));
+  const replacement = model.states.findIndex(state => state.g === GRADES.indexOf(cfg.startGrade) && state.e === 0 && state.u === 0);
+  const cash = price => price * (1 - cfg.fee / 100) - cfg.itemPrice;
+  const rows = model.transitions.map(row => ({ choices: row.choices.map(choice => ({ p: choice.p, actions: [
+    { target: choice.holdIndex, reward: choice.rewardHold },
+    ...(!choice.forcedHold ? [{ target: choice.sellIndex, reward: choice.rewardSell }] : []),
+    ...(choice.firstKey === option.key ? [{ target: primeIndex.get(choice.price), reward: choice.rewardHold }] : []),
+  ] })) }));
+  for (const oldPrice of prices) {
+    rows.push({ choices: option.distribution.map(outcome => {
+      const retained = (outcome.price ?? -Infinity) > (oldPrice ?? -Infinity) ? outcome.price : oldPrice;
+      return { p: outcome.probability, actions: [
+        { target: primeIndex.get(retained), reward: -primeCost },
+        ...(retained !== null ? [{ target: replacement, reward: -primeCost + cash(retained) }] : []),
+      ] };
+    }) });
+  }
+  const choices = rows.flatMap((row, state) => row.choices.map((choice, outcome) => ({ state, outcome, ...choice }))).filter(choice => choice.actions.length > 1);
+  const selected = rows.map(row => row.choices.map(() => 0));
+  let best = -Infinity, policyCount = 0;
+  function enumerate(cursor) {
+    if (cursor < choices.length) {
+      const choice = choices[cursor];
+      for (let action = 0; action < choice.actions.length; action++) { selected[choice.state][choice.outcome] = action; enumerate(cursor + 1); }
+      return;
+    }
+    const chain = rows.map((row, state) => {
+      const transitions = new Map(); let reward = 0;
+      row.choices.forEach((choice, outcome) => {
+        const action = choice.actions[selected[state][outcome]];
+        transitions.set(action.target, (transitions.get(action.target) ?? 0) + choice.p);
+        reward += choice.p * action.reward;
+      });
+      return { transitions: [...transitions], reward };
+    });
+    best = Math.max(best, gainForPolicy(chain, model.initial)); policyCount++;
+  }
+  enumerate(0);
+  return { best, policyCount };
+}
+
+test('Prime absorption agrees with an exhaustive full-state oracle through both pity counters and replacement', () => {
+  const cfg = {
+    startGrade: '에픽', itemPrice: 5, fee: 10, floorPrice: 0, autoSell: true,
+    costs: { 에픽: 3, 유니크: 4, 레전드리: 10 },
+    upRates: { 에픽: .3, 유니크: .4 }, pity: { 에픽: 1, 유니크: 0 }, stacks: { 에픽: 1, 유니크: 0 },
+    distributions: { 에픽: [outcome(1, 4)], 유니크: [outcome(.5, 15), outcome(.5, null)],
+      레전드리: [{ probability: .6, price: null, firstKey: 'A' }, { probability: .4, price: 100, firstKey: 'B' }] },
+    prime: { on: true, cost: 2, fixedKey: 'A', options: [{ key: 'A', distribution: [outcome(.5, null), outcome(.5, 100)] }] },
+  };
+  const oracle = enumeratePrimeOracle(cfg), result = solveAdditionalTrade(cfg);
+  assert.ok(oracle.policyCount > 100);
+  close(result.steady.profitPerReset, oracle.best);
+  close(result.convergence.bellmanProfitPerReset, oracle.best);
+  assert.ok(result.current.expectedPrimeAttempts > 0);
+  assert.ok(result.current.expectedAttempts !== result.steady.expectedAttempts); // current stack differs
+});
+
+test('Prime full-state oracle includes a cheaper no-sale recurrent class', () => {
+  const cfg = { startGrade: '레전드리', itemPrice: 200, fee: 0, floorPrice: 0, autoSell: true,
+    costs: { 레전드리: 10 }, upRates: {}, pity: {}, stacks: {},
+    distributions: { 레전드리: [{ probability: .5, price: null, firstKey: 'A' }, { probability: .5, price: 1, firstKey: 'B' }] },
+    prime: { on: true, cost: 1, fixedKey: 'A', options: [{ key: 'A', distribution: [outcome(.5, null), outcome(.5, 1)] }] },
+  };
+  const oracle = enumeratePrimeOracle(cfg), result = solveAdditionalTrade(cfg);
+  close(result.steady.profitPerReset, oracle.best);
+  assert.equal(result.possible, false);
+});
 
 const outcome = (probability, price, targetId = null) => ({ probability, price, targetId });
 function input(overrides = {}) {

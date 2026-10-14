@@ -151,3 +151,57 @@ test('unavailable slot bands, mismatched current lines and malformed inputs fail
   settings.grade = '유니크'; settings.manual.method = 'strange';
   assert.match(calculateAdditionalStrategy(settings).manual.reason, /에픽/);
 });
+
+test('Prime defaults and saved choices normalize without losing explicit free cube prices', () => {
+  assert.deepEqual(DEFAULT_ADDITIONAL_SETTINGS.prime, { on: false, cost: 1_400_000_000, fixedKey: 'auto' });
+  assert.deepEqual(normalizeAdditionalSettings().prime, DEFAULT_ADDITIONAL_SETTINGS.prime);
+  const saved = normalizeAdditionalSettings({ prime: { on: true, cost: 0, fixedKey: 'obsolete option' } });
+  assert.deepEqual(saved.prime, { on: true, cost: 0, fixedKey: 'auto' });
+  assert.throws(() => validateAdditionalSettings({ ...fresh(), prime: { on: true, cost: -1, fixedKey: 'auto' } }));
+  assert.throws(() => validateAdditionalSettings({ ...fresh(), prime: { on: true, cost: 14e8, fixedKey: 'STR +999%' } }));
+});
+
+test('auto Prime maximizes the whole strategy value rather than the fixed option score', () => {
+  const settings = fresh(); settings.grade = '레전드리';
+  settings.currentOptions = ['최대 HP +360', '없음', '없음'];
+  settings.costs.레전드리 = 1e12;
+  settings.prime = { on: true, cost: 1e6, fixedKey: 'auto' };
+  const result = calculateAdditionalStrategy(settings), row = result.strategies.find(row => row.id === 'reset');
+  assert.equal(result.currentScore, 0);
+  assert.equal(row.fixedKey, '최대 HP +360');
+  assert.equal(row.action, 'prime'); assert.ok(row.expectedPrimeAttempts > 0);
+  assert.equal(row.expectedResetAttempts, 0);
+  assert.ok(row.expectedNetValue > row.baseline.expectedNetValue);
+  const candidates = row.primeOptimization.candidates;
+  assert.equal(row.expectedNetValue, Math.max(...candidates.map(candidate => candidate.value)));
+  close(row.expectedCost, row.expectedPrimeCost);
+  assert.deepEqual(row.examples, []); // scalar cutoff cannot describe first-line-dependent stopping
+  settings.prime.cost = 1e12;
+  const expensive = calculateAdditionalStrategy(settings).strategies.find(row => row.id === 'reset');
+  assert.equal(expensive.action, 'stop'); assert.equal(expensive.expectedPrimeAttempts, 0);
+  assert.equal(expensive.primeOptimization.reason, 'no-benefit');
+  assert.equal(expensive.primeOptimization.selectedFixedKey, null);
+  assert.ok(expensive.primeOptimization.bestFixedKey);
+  close(expensive.expectedNetValue, expensive.baseline.expectedNetValue);
+});
+
+test('auto Prime accounts for acquisition cost and manual targets keep Prime available', () => {
+  const settings = fresh(); settings.grade = '레전드리';
+  settings.currentOptions = ['공격력 +16', '없음', '없음'];
+  settings.prime = { on: true, cost: 1e6, fixedKey: 'auto' };
+  settings.costs.레전드리 = 5e7;
+  let row = calculateAdditionalStrategy(settings).strategies.find(row => row.id === 'reset');
+  assert.equal(row.fixedLabel, '공격력 +16'); assert.equal(row.action, 'prime');
+  settings.costs.레전드리 = 1e6;
+  row = calculateAdditionalStrategy(settings).strategies.find(row => row.id === 'reset');
+  assert.equal(row.fixedLabel, 'STR +8%'); assert.equal(row.action, 'reset');
+  assert.ok(row.expectedResetAttempts > 0 && row.expectedPrimeAttempts > 0);
+  settings.prime.fixedKey = '공격력 +16';
+  settings.manual = { enabled: true, method: 'reset', thresholds: { 에픽: 10, 유니크: 15, 레전드리: 12 } };
+  const result = calculateAdditionalStrategy(settings);
+  assert.equal(result.manual.available, true);
+  assert.ok(result.manual.expectedPrimeAttempts > 0);
+  assert.ok(result.manual.expectedFinalScore >= 12);
+  close(result.manual.expectedAttempts, result.manual.expectedResetAttempts + result.manual.expectedPrimeAttempts);
+  close(result.manual.expectedNetValue, result.manual.expectedGain * settings.mesoPerPercent - result.manual.expectedCost);
+});
