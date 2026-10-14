@@ -232,6 +232,298 @@ test('additional calculators share seven efficiency inputs and use the fixed cha
   });
 });
 
+const tradeEquipment = [
+  {
+    path: 'potential', storageKey: 'mpc:auto:v1',
+    purchase: '노작 매입가 (억 메소)', level: '레벨 제한', part: '착용 부위',
+    stacks: ['현재 유→레 천장 스택 (0~107)'],
+    floor: '레전 깡통·잡옵 처분가 (억, 폴백용)',
+  },
+  {
+    path: 'additional-trade', storageKey: 'maple:additional-trade:settings:v1',
+    purchase: '시작 등급 깡통 매입가 (억 메소)', level: '아이템 레벨 제한', part: '대상 아이템 부위',
+    grade: '재설정 시작 등급', stacks: ['에픽 현재 등급업 실패 스택', '유니크 현재 등급업 실패 스택'],
+    floor: '레전드리 잡옵 처분가 (억 메소)',
+  },
+];
+
+test('trading equipment panels share the potential workflow and full-width controls on desktop and phone', async () => {
+  for (const viewport of [{ width: 1440, height: 1000 }, { width: 375, height: 812 }]) {
+    await withPage(async page => {
+      for (const fields of tradeEquipment) {
+        await open(page, fields.path);
+        const panel = page.locator('main:visible .calculator-trade-equipment');
+        assert.equal(await panel.count(), 1);
+        assert.equal(await panel.getByRole('heading', { level: 2, name: '장비 설정', exact: true }).count(), 1);
+        const expectedOrder = [fields.purchase, fields.level, fields.part, ...(fields.grade ? [fields.grade] : []),
+          ...fields.stacks, '경매장 수수료 (%)', fields.floor];
+        const controls = panel.locator('input[type="number"], select');
+        assert.deepEqual(await controls.evaluateAll(inputs => inputs.map(input => input.getAttribute('aria-label'))), expectedOrder);
+        const geometry = await controls.evaluateAll(inputs => inputs.map(input => {
+          // A number field's visible border also contains its unit suffix.
+          const control = input.closest('.calculator-input-unit') || input;
+          const rectangle = control.getBoundingClientRect();
+          const card = input.closest('.calculator-card');
+          const style = getComputedStyle(card);
+          return {
+            x: rectangle.x, y: rectangle.y, bottom: rectangle.bottom, width: rectangle.width,
+            available: card.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+              - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth),
+          };
+        }));
+        for (let index = 0; index < geometry.length; index += 1) {
+          const control = geometry[index];
+          assert.ok(Math.abs(control.width - control.available) <= 1, `${fields.path}: ${expectedOrder[index]} must fill its settings card.`);
+          if (index) {
+            assert.ok(control.y >= geometry[index - 1].bottom, `${fields.path}: controls must follow the same vertical order.`);
+            assert.ok(Math.abs(control.x - geometry[0].x) <= 1, `${fields.path}: controls must share the same left edge.`);
+          }
+        }
+        await controls.first().focus();
+        for (let index = 1; index < expectedOrder.length; index += 1) {
+          await page.keyboard.press('Tab');
+          assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-label')), expectedOrder[index]);
+        }
+        await assertNoOverflow(page, `${fields.path} equipment settings at ${viewport.width}px`);
+      }
+    }, { viewport });
+  }
+});
+
+test('shared trading equipment inputs keep each calculator\'s units, blanks and saved settings', async () => {
+  for (const fields of tradeEquipment) {
+    await withPage(async page => {
+      await open(page, fields.path);
+      const panel = page.locator('main:visible .calculator-trade-equipment');
+      await panel.getByLabel(fields.purchase, { exact: true }).fill('2.375');
+      await panel.getByLabel(fields.level, { exact: true }).selectOption('250');
+      await panel.getByLabel(fields.part, { exact: true }).selectOption(fields.grade ? '장갑' : 'hat');
+      if (fields.grade) await panel.getByLabel(fields.grade, { exact: true }).selectOption('유니크');
+      await panel.getByLabel(fields.stacks.at(-1), { exact: true }).fill('23');
+      await panel.getByLabel('경매장 수수료 (%)', { exact: true }).fill('2.75');
+      await panel.getByLabel(fields.floor, { exact: true }).fill('1.125');
+      const expected = fields.grade
+        ? { itemPrice: 237500000, floorPrice: 112500000, fee: 2.75, level: 250, slot: '장갑', startGrade: '유니크' }
+        : { itemPriceEok: '2.375', floorEok: '1.125', fee: '2.75', level: 250, part: 'hat', pity: '23' };
+      await page.waitForFunction(({ key, values }) => {
+        const saved = JSON.parse(localStorage.getItem(key));
+        return saved && Object.entries(values).every(([name, value]) => saved[name] === value);
+      }, { key: fields.storageKey, values: expected });
+      const saved = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), fields.storageKey);
+      if (fields.grade) {
+        assert.equal(saved.stacks.유니크, 23);
+        assert.deepEqual(saved.costs, { 에픽: 34300000, 유니크: 83300000, 레전드리: 98000000 }, 'Selecting a new item level must update reset costs.');
+      }
+      await page.reload();
+      await panel.waitFor();
+      assert.equal(await panel.getByLabel(fields.purchase, { exact: true }).inputValue(), '2.375');
+      assert.equal(await panel.getByLabel(fields.floor, { exact: true }).inputValue(), '1.125');
+      assert.equal(await panel.getByLabel('경매장 수수료 (%)', { exact: true }).inputValue(), '2.75');
+      assert.equal(await panel.getByLabel(fields.level, { exact: true }).inputValue(), '250');
+      assert.equal(await panel.getByLabel(fields.part, { exact: true }).inputValue(), fields.grade ? '장갑' : 'hat');
+      assert.equal(await panel.getByLabel(fields.stacks.at(-1), { exact: true }).inputValue(), '23');
+      for (const label of [fields.purchase, fields.floor, '경매장 수수료 (%)']) {
+        await panel.getByLabel(label, { exact: true }).fill('');
+      }
+      const blankKeys = fields.grade ? ['itemPrice', 'floorPrice', 'fee'] : ['itemPriceEok', 'floorEok', 'fee'];
+      await page.waitForFunction(({ key, names }) => {
+        const settings = JSON.parse(localStorage.getItem(key));
+        return settings && names.every(name => settings[name] === '');
+      }, { key: fields.storageKey, names: blankKeys });
+      await page.reload();
+      await panel.waitFor();
+      for (const label of [fields.purchase, fields.floor, '경매장 수수료 (%)']) {
+        assert.equal(await panel.getByLabel(label, { exact: true }).inputValue(), '', 'Clearing a price or fee must remain an empty input after reload.');
+      }
+    });
+  }
+});
+
+test('additional equipment settings expose reachable pity stacks and retain each part\'s sale prices', async () => {
+  await withPage(async page => {
+    await open(page, 'additional-trade');
+    const panel = page.locator('main:visible .calculator-trade-equipment');
+    const epicStack = page.getByLabel('에픽 현재 등급업 실패 스택', { exact: true });
+    const uniqueStack = page.getByLabel('유니크 현재 등급업 실패 스택', { exact: true });
+    assert.equal(await epicStack.count(), 1, 'Current epic stacks must be editable in one place.');
+    assert.equal(await uniqueStack.count(), 1, 'Current unique stacks must be editable in one place.');
+    await epicStack.fill('17');
+    await uniqueStack.fill('29');
+    const startGrade = panel.getByLabel('재설정 시작 등급', { exact: true });
+    await startGrade.selectOption('유니크');
+    assert.equal(await epicStack.count(), 0, 'Epic stacks do not affect a trade that starts at unique.');
+    assert.equal(await uniqueStack.inputValue(), '29');
+    await startGrade.selectOption('레전드리');
+    assert.equal(await epicStack.count(), 0);
+    assert.equal(await uniqueStack.count(), 0, 'Legendary trades have no further grade-up stack.');
+    await startGrade.selectOption('에픽');
+    assert.equal(await epicStack.inputValue(), '17');
+    assert.equal(await uniqueStack.inputValue(), '29');
+
+    await page.getByRole('button', { name: /가격 조건 추가/ }).click();
+    const price = page.getByLabel('공통 1번 가격 조건의 시세 (억 메소)', { exact: true });
+    await price.fill('10');
+    const part = panel.getByLabel('대상 아이템 부위', { exact: true });
+    await part.selectOption('장갑');
+    assert.equal(await price.count(), 0, 'Changing parts must show the selected part\'s price bank.');
+    await page.getByRole('button', { name: /가격 조건 추가/ }).click();
+    await price.fill('12');
+    await part.selectOption('모자');
+    assert.equal(await price.inputValue(), '10');
+    await part.selectOption('장갑');
+    assert.equal(await price.inputValue(), '12');
+    await page.reload();
+    await panel.waitFor();
+    assert.equal(await part.inputValue(), '장갑');
+    assert.equal(await price.inputValue(), '12');
+    await part.selectOption('모자');
+    assert.equal(await price.inputValue(), '10', 'Returning after reload must recover the previous part\'s price bank.');
+  });
+});
+
+test('additional calculators fix grade-up rules while retaining saved equipment, current stacks and trade presets', async () => {
+  const discountedCosts = { 에픽: 17000000, 유니크: 45000000, 레전드리: 66000000 };
+  const oldSettings = {
+    slot: '장갑', level: 160, grade: '에픽', startGrade: '에픽', costs: discountedCosts,
+    upRates: { 에픽: 0.5, 유니크: 0.6 }, pity: { 에픽: 20, 유니크: 40 }, stacks: { 에픽: 13, 유니크: 27 },
+  };
+  for (const route of [
+    { path: 'additional', key: 'maple:additional:settings:v1', grade: '현재 에디셔널 잠재능력 등급' },
+    { path: 'additional-trade', key: 'maple:additional-trade:settings:v1', grade: '재설정 시작 등급' },
+  ]) {
+    await withPage(async page => {
+      await open(page, route.path);
+      const panel = page.locator('main:visible .calculator-trade-equipment');
+      assert.equal(await panel.getByRole('heading', { level: 2, name: '장비 설정', exact: true }).count(), 1);
+      assert.equal(await page.getByRole('heading', { level: 2, name: '재설정 비용', exact: true }).count(), 1);
+      assert.equal(await page.getByRole('spinbutton', { name: /등급업 확률|확정 등급업|천장 실패 횟수/, includeHidden: true }).count(), 0,
+        'Grade-up probabilities and guaranteed grade-up limits must not remain editable, including in collapsed panels.');
+      await page.waitForFunction(key => {
+        const saved = JSON.parse(localStorage.getItem(key));
+        return saved?.upRates?.에픽 === 0.009804 && saved.upRates.유니크 === 0.007
+          && saved.pity?.에픽 === 152 && saved.pity.유니크 === 214;
+      }, route.key);
+      const restored = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), route.key);
+      assert.equal(restored.level, 160);
+      assert.equal(restored.slot, '장갑');
+      assert.deepEqual(restored.costs, discountedCosts, 'Restoring official grade-up rules must preserve discounted reset costs.');
+      const epicStack = panel.getByLabel('에픽 현재 등급업 실패 스택', { exact: true });
+      const uniqueStack = panel.getByLabel('유니크 현재 등급업 실패 스택', { exact: true });
+      assert.equal(await epicStack.inputValue(), '13');
+      assert.equal(await uniqueStack.inputValue(), '27');
+      assert.equal(await epicStack.getAttribute('max'), '152');
+      assert.equal(await uniqueStack.getAttribute('max'), '214');
+      await epicStack.fill('15');
+      await uniqueStack.fill('31');
+      const grade = panel.getByLabel(route.grade, { exact: true });
+      await grade.selectOption('유니크');
+      assert.equal(await epicStack.count(), 0);
+      assert.equal(await uniqueStack.inputValue(), '31');
+      await grade.selectOption('레전드리');
+      assert.equal(await uniqueStack.count(), 0);
+      await grade.selectOption('에픽');
+      assert.equal(await epicStack.inputValue(), '15');
+      assert.equal(await uniqueStack.inputValue(), '31');
+      await page.waitForFunction(key => {
+        const saved = JSON.parse(localStorage.getItem(key));
+        return saved?.stacks?.에픽 === 15 && saved.stacks.유니크 === 31;
+      }, route.key);
+      await page.reload();
+      await panel.waitFor();
+      assert.equal(await epicStack.inputValue(), '15');
+      assert.equal(await uniqueStack.inputValue(), '31');
+
+      if (route.path === 'additional-trade') {
+        await page.getByLabel('저장된 프리셋', { exact: true }).selectOption('이전 규칙');
+        await page.waitForFunction(key => {
+          const saved = JSON.parse(localStorage.getItem(key));
+          return saved?.startGrade === '유니크' && saved.stacks?.유니크 === 76;
+        }, route.key);
+        const preset = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), route.key);
+        assert.deepEqual(preset.upRates, { 에픽: 0.009804, 유니크: 0.007 });
+        assert.deepEqual(preset.pity, { 에픽: 152, 유니크: 214 });
+        assert.deepEqual(preset.stacks, { 에픽: 55, 유니크: 76 }, 'Current stacks must survive migration even when they exceed the obsolete saved limit.');
+        assert.equal(preset.itemPrice, 320000000);
+        assert.equal(await panel.getByLabel('시작 등급 깡통 매입가 (억 메소)', { exact: true }).inputValue(), '3.2');
+        assert.equal(await uniqueStack.inputValue(), '76');
+      }
+    }, {
+      data: { key: route.key, settings: oldSettings },
+      init: ({ key, settings }) => {
+        if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(settings));
+        const presetsKey = 'maple:additional-trade:presets:v1';
+        if (key.includes('additional-trade') && !localStorage.getItem(presetsKey)) {
+          localStorage.setItem(presetsKey, JSON.stringify({ '이전 규칙': {
+            ...settings, startGrade: '유니크', itemPrice: 320000000,
+            stacks: { 에픽: 55, 유니크: 76 },
+          } }));
+        }
+      },
+    });
+  }
+});
+
+test('trading sale editors share the wide results area and preserve prices through keyboard grade selection', async () => {
+  for (const viewport of [{ width: 1440, height: 1000 }, { width: 375, height: 812 }]) {
+    await withPage(async page => {
+      let commonGradeLabels;
+      for (const path of ['potential', 'additional-trade']) {
+        await open(page, path);
+        const results = page.locator('main:visible .calculator-results');
+        const editor = results.locator(':scope > .trade-price-editor');
+        assert.equal(await editor.count(), 1, 'Sale prices belong in the main area beside equipment settings.');
+        assert.equal(await editor.getByRole('heading', { level: 2, name: '판매가', exact: true }).count(), 1);
+        if (path === 'additional-trade') {
+          await editor.getByRole('button', { name: '등급별 가격 입력으로 전환', exact: true }).click();
+        }
+        const gradeButtons = editor.locator('.trade-price-grade-buttons');
+        const legendary = gradeButtons.getByRole('button', { name: /^레전드리(?: 매물 가격)?$/ });
+        const unique = gradeButtons.getByRole('button', { name: /^유니크(?: 매물 가격)?$/ });
+        const gradeLabels = [await unique.innerText(), await legendary.innerText()];
+        commonGradeLabels ??= gradeLabels;
+        assert.deepEqual(gradeLabels, commonGradeLabels, 'The same sale grades must have the same button labels in both trading calculators.');
+        const price = editor.getByLabel(path === 'potential'
+          ? '유니크 STR 12% 판매가 (억 메소)' : '레전드리 1번 가격 조건의 시세 (억 메소)', { exact: true });
+        if (path === 'potential') {
+          await price.fill('10');
+          await legendary.press('Enter');
+          assert.equal(await legendary.getAttribute('aria-pressed'), 'true');
+          await unique.press('Enter');
+        } else {
+          await legendary.press('Enter');
+          assert.equal(await legendary.getAttribute('aria-pressed'), 'true');
+          await editor.getByRole('button', { name: /가격 조건 추가/ }).click();
+          await price.fill('10');
+          await unique.press('Enter');
+          await legendary.press('Enter');
+        }
+        assert.equal(await price.inputValue(), '10', 'Changing the visible grade must preserve its entered sale price.');
+        const geometry = await editor.evaluate(element => {
+          const rect = node => {
+            const { x, y, width, bottom, right } = node.getBoundingClientRect();
+            return { x, y, width, bottom, right };
+          };
+          const main = element.closest('main');
+          return {
+            editor: rect(element), results: rect(element.parentElement),
+            equipment: rect(main.querySelector('.calculator-trade-equipment')),
+            layout: rect(main.querySelector('.calculator-layout')),
+          };
+        });
+        assert.ok(Math.abs(geometry.editor.width - geometry.results.width) <= 1, `${path}: sale editor must fill the results column.`);
+        if (viewport.width > 800) {
+          assert.ok(geometry.editor.x >= geometry.equipment.right, `${path}: sale editor must sit beside equipment settings.`);
+          assert.ok(geometry.editor.width > geometry.equipment.width, `${path}: prices need the wider main column.`);
+        } else {
+          assert.ok(geometry.editor.y >= geometry.equipment.bottom, `${path}: sale editor must follow equipment settings on a phone.`);
+          assert.ok(Math.abs(geometry.editor.width - geometry.layout.width) <= 1, `${path}: phone price entry must use the full content width.`);
+        }
+        await assertNoOverflow(page, `${path} populated sale editor at ${viewport.width}px`);
+      }
+    }, { viewport });
+  }
+});
+
 async function configureGuaranteedTrade(page) {
   await open(page, 'additional-trade');
   await page.getByLabel('재설정 시작 등급', { exact: true }).selectOption('레전드리');

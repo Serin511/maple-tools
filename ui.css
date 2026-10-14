@@ -102,6 +102,29 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .calculator-efficiencies input { padding: 7px 8px; text-align: right; }
 .calculator-equal { color: var(--ui-muted); text-align: center; }
 
+/* The original potential equipment panel defines the trading input workflow. */
+.calculator-trade-equipment { display: flex; flex-direction: column; gap: 10px; }
+.calculator-page .calculator-trade-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; color: var(--ui-muted); font-size: 12px; line-height: 1.8; }
+.calculator-trade-field .calculator-input-unit { padding-right: 0; border-color: var(--ui-border); }
+.calculator-trade-field .calculator-input-unit:focus-within { border-color: var(--ui-accent); }
+.calculator-page .calculator-trade-field :is(input, select) { min-height: 40px; margin-top: 0; font-size: 13px; }
+.calculator-trade-field input { text-align: center; }
+.calculator-trade-field select { border-color: var(--ui-border); }
+.calculator-trade-help { color: var(--ui-muted); font-size: 11px; line-height: 1.8; }
+.calculator-trade-reset-costs { display: flex; flex-direction: column; gap: 8px; }
+.calculator-page .calculator-trade-cost-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.calculator-trade-cost-row > span:first-child { font-size: 12px; font-weight: 600; }
+.calculator-trade-cost-row .calculator-input-unit { flex: 0 0 130px; width: 130px; padding-right: 0; border-color: var(--ui-border); }
+.calculator-trade-cost-row .calculator-input-unit:focus-within { border-color: var(--ui-accent); }
+.calculator-page .calculator-trade-cost-row input { min-height: 40px; font-size: 13px; text-align: right; }
+.calculator-trade-toggles { display: flex; flex-direction: column; gap: 12px; }
+.calculator-page .calculator-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; color: var(--ui-text); background: none; font-size: 13px; line-height: 1.6; text-align: left; }
+.calculator-toggle-track { position: relative; width: 34px; height: 19px; flex-shrink: 0; border-radius: 10px; background: #3a4250; transition: background .15s; }
+.calculator-toggle[aria-checked="true"] .calculator-toggle-track { background: var(--calculator-toggle-color); }
+.calculator-toggle-track > span { position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; transition: left .15s; }
+.calculator-toggle[aria-checked="true"] .calculator-toggle-track > span { left: 17px; }
+.calculator-toggle-description { margin: 4px 0 0 42px !important; color: var(--ui-muted); font-size: 10px; line-height: 1.8; }
+
 .calculator-header { margin-bottom: 30px; }
 .calculator-eyebrow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; color: var(--ui-accent); font-size: 10px; font-weight: 750; letter-spacing: .14em; }
 .calculator-scope { color: var(--ui-muted); font-weight: 500; letter-spacing: 0; }
@@ -145,7 +168,8 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   .calculator-header h1 { font-size: 26px; }
 }
 @media (pointer: coarse) {
-  .maple-nav a, .calculator-page button, .calculator-page select, .calculator-page input:not([type="checkbox"]):not([type="radio"]), .calculator-page summary { min-height: 44px; }
+  .maple-nav a, .calculator-page button, .calculator-page select, .calculator-page input:not([type="checkbox"]):not([type="radio"]), .calculator-page summary,
+  .calculator-page .calculator-trade-field :is(input, select), .calculator-page .calculator-trade-cost-row input { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .calculator-page *, .calculator-page *::before, .calculator-page *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

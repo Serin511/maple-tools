@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { COST_DEFAULT, PART_LABELS, STATS, primeAtomList, atomLabel } from "./potential-engine.mjs";
 import { normalizePotentialSettings, normalizePotentialPresets, migratePotentialPrices as migratePrices } from "./potential-settings.mjs";
 import { preparePotentialConfig } from "./potential-calculator.mjs";
-import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, PresetControls } from "./ui.jsx";
+import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, PresetControls, TradeEquipmentSettings, TradeResetCostSettings, ToggleField } from "./ui.jsx";
+import { TradePriceEditor } from "./TradePriceEditor.jsx";
 import "./potential.css";
 
 // ---------- 포맷 ----------
@@ -46,20 +47,10 @@ const Num = ({ value, onChange, w = 72, ph = "", label, max, step = "any" }) => 
   <input aria-label={label} type="number" min="0" max={max} value={value} placeholder={ph} onChange={(e) => onChange(e.target.value)}
     style={{ ...inputStyle, width: w, textAlign: "center" }} step={step} />
 );
-const Toggle = ({ on, set, label, color = C.accent }) => (
-  <button type="button" className="potential-toggle" role="switch" aria-checked={on} onClick={() => set(!on)} style={{
-    display: "flex", alignItems: "center", gap: 8, background: "none", border: "none",
-    cursor: "pointer", color: C.text, fontSize: 13, padding: 0, fontFamily: "inherit" }}>
-    <span style={{
-      width: 34, height: 19, borderRadius: 10, background: on ? color : "#3a4250",
-      position: "relative", transition: "background .15s", flexShrink: 0 }}>
-      <span style={{
-        position: "absolute", top: 2, left: on ? 17 : 2, width: 15, height: 15,
-        borderRadius: "50%", background: "#fff", transition: "left .15s" }} />
-    </span>
-    {label}
-  </button>
-);
+const numericInput = value => value === '' ? '' : Number(value);
+const eokToMeso = value => value === '' ? '' : Number(value) * 1e8;
+const mesoToEok = value => value === '' ? '' : String(value / 1e8);
+const Toggle = ({ on, set, label, color = C.accent }) => <ToggleField on={on} onChange={set} label={label} color={color} />;
 const Badge = ({ kind, children }) => (
   <span style={{
     fontSize: 11, padding: "2px 8px", borderRadius: 999, fontWeight: 600,
@@ -89,6 +80,14 @@ export default function App() {
   const [primeFixed, setPrimeFixed] = useState(initial?.primeFixed ?? "STR");
   const primeOpts = useMemo(() => primeAtomList(part, level), [part, level]);
   useEffect(() => { if (!primeOpts.some((a) => a.key === primeFixed)) setPrimeFixed(primeOpts[0].key); }, [primeOpts, primeFixed]);
+
+  function changeEquipment(patch) {
+    if (Object.hasOwn(patch, 'itemPrice')) setItemPriceEok(mesoToEok(patch.itemPrice));
+    if (Object.hasOwn(patch, 'floorPrice')) setFloorEok(mesoToEok(patch.floorPrice));
+    if (Object.hasOwn(patch, 'fee')) setFee(String(patch.fee));
+    if (Object.hasOwn(patch, 'level')) setLevel(patch.level);
+    if (Object.hasOwn(patch, 'part')) setPart(patch.part);
+  }
 
   const firstLevelRun = useRef(true);
   const skipCostReset = useRef(false);
@@ -346,26 +345,13 @@ export default function App() {
         <div className="calculator-layout potential-layout">
           {/* 좌측: 설정 */}
           <aside className="calculator-settings potential-settings" aria-label="잠재능력 장사 설정">
-            <CalculatorCard as="div" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em" }}>장비 설정</div>
-              <label style={{ fontSize: 12, color: C.sub }}>노작 매입가 (억 메소)
-                <Num value={itemPriceEok} onChange={setItemPriceEok} w="100%" /></label>
-              <label style={{ fontSize: 12, color: C.sub }}>레벨 제한
-                <select aria-label="레벨 제한" value={level} onChange={(e) => setLevel(+e.target.value)} style={inputStyle}>
-                  {[140, 160, 200, 250].map((l) => <option key={l} value={l}>{l}제</option>)}
-                </select></label>
-              <label style={{ fontSize: 12, color: C.sub }}>착용 부위
-                <select aria-label="착용 부위" value={part} onChange={(e) => setPart(e.target.value)} style={inputStyle}>
-                  {Object.entries(PART_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                </select></label>
-              <label style={{ fontSize: 12, color: C.sub }}>현재 유→레 천장 스택 (0~107)
-                <Num value={pity} onChange={setPity} w="100%" max={107} step="1" /></label>
-              <label style={{ fontSize: 12, color: C.sub }}>경매장 수수료 (%)
-                <Num value={fee} onChange={setFee} w="100%" max={100} /></label>
-              <label style={{ fontSize: 12, color: C.sub }}>레전 깡통·잡옵 처분가 (억, 폴백용)
-                <Num value={floorEok} onChange={setFloorEok} w="100%" /></label>
-            </CalculatorCard>
-            <CalculatorCard as="div" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <TradeEquipmentSettings values={{ itemPrice: eokToMeso(itemPriceEok), level, part, fee: numericInput(fee), floorPrice: eokToMeso(floorEok) }}
+              onChange={changeEquipment}
+              levelOptions={[140, 160, 200, 250].map(value => ({ value, label: `${value}제` }))}
+              partOptions={Object.entries(PART_LABELS).map(([value, label]) => ({ value, label }))}
+              pityFields={[{ key: 'unique', label: '현재 유→레 천장 스택 (0~107)', value: numericInput(pity), max: 107,
+                onChange: value => setPity(String(value)) }]} />
+            <CalculatorCard as="div" className="calculator-trade-toggles">
               <Toggle on={miracle} set={setMiracle} label="미라클데이 (등급업 확률 ×2)" color="#f2c744" />
               <Toggle on={autoExclude} set={setAutoExclude} label="홀드 판정 타겟 자동 제외 (최적 정책)" />
               <Toggle on={allstatCount} set={setAllstatCount} label="올스탯 줄을 스탯 합산에 포함" />
@@ -394,59 +380,31 @@ export default function App() {
                 onSave={savePreset} onDelete={deletePreset} />
               <div style={{ fontSize: 11, color: C.sub }}>입력값은 이 브라우저에 자동 저장돼요 (새로고침해도 유지)</div>
             </CalculatorCard>
-            <CalculatorCard as="div" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em" }}>재설정 비용 (메소, 수정 가능)</div>
-              {[["epic", "에픽", C.epic], ["unique", "유니크", C.unique], ["legend", "레전드리", C.legend]].map(([k, lb, col]) => (
-                <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <span style={{ fontSize: 12, color: col, fontWeight: 600 }}>{lb}</span>
-                  <input aria-label={`${lb} 재설정 비용 (메소)`} type="number" min="0" value={costs[k]} onChange={(e) => setCosts({ ...costs, [k]: e.target.value })}
-                    style={{ ...inputStyle, width: 130, textAlign: "right" }} />
-                </div>
-              ))}
-              <div style={{ fontSize: 11, color: C.sub }}>기본값: 2024.01 공식 표 ({level}제 구간)</div>
-            </CalculatorCard>
+            <TradeResetCostSettings
+              costs={[["epic", "에픽", C.epic], ["unique", "유니크", C.unique], ["legend", "레전드리", C.legend]].map(([key, label, color]) => ({
+                key, label, color, value: numericInput(costs[key]), onChange: value => setCosts(previous => ({ ...previous, [key]: String(value) })),
+              }))}
+              note={`기본값: 2024.01 공식 표 (${level}제 구간)`} />
           </aside>
 
           {/* 우측: 판매가 입력 */}
           <section className="calculator-results potential-results" aria-label="잠재능력 판매가와 계산 결과" aria-busy={busy}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 11, color: C.sub }}>
-                판매가 입력값은 레벨·부위를 바꿔도 유지돼요 (레벨별 기준치 칸에 각각 저장)
-              </span>
-              <button onClick={clearAllPrices} style={{
-                background: resetArm ? "rgba(242,122,106,.15)" : C.panel,
-                border: `1px solid ${resetArm ? C.danger : C.border}`,
-                color: resetArm ? C.danger : C.sub, borderRadius: 8, padding: "6px 12px",
-                fontSize: 12, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
-                fontWeight: resetArm ? 700 : 400, transition: "all .15s" }}>
-                {resetArm ? "한 번 더 누르면 전체 삭제" : "입력한 판매가 일괄 초기화"}
-              </button>
-            </div>
+            <TradePriceEditor description="가격을 알고 있는 목표 성능의 시세를 입력하세요. 빈칸은 해당 조건으로 판매하지 않습니다."
+              persistenceNote="판매가 입력값은 레벨·부위를 바꿔도 유지돼요 (레벨별 기준치 칸에 각각 저장)"
+              actions={<button type="button" className="trade-price-action" data-confirm={resetArm} onClick={clearAllPrices}>
+                {resetArm ? "한 번 더 누르면 전체 삭제" : "입력한 판매가 일괄 초기화"}</button>}
+              gradeOptions={part === "glove" ? [] : [
+                { value: "u", label: "유니크 매물 가격", color: C.unique },
+                { value: "l", label: "레전드리 매물 가격", color: C.legend },
+              ]} gradeValue={priceGrade} onGradeChange={setPriceGrade}
+              gradeHelp={part !== "glove" && "같은 성능이라도 등급에 따라 시세가 달라 유니크·레전드리 가격을 각각 저장합니다."}
+              gradeActions={<button type="button" className="trade-price-action" onClick={copyPricesToOther}
+                title="현재 탭의 가격을 다른 등급 탭에 덮어씀">→ {priceGrade === "u" ? "레전" : "유니크"} 탭에 복사</button>}>
             {part !== "glove" && (
-              <CalculatorCard as="div" >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                  <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em" }}>
-                    판매가 — 스탯 합계 (억 메소 · 빈칸 = 그 등급에선 판매 안 함)
-                  </div>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    {[["u", "유니크 매물 가격", C.unique], ["l", "레전드리 매물 가격", C.legend]].map(([k, lb, col]) => (
-                      <button key={k} aria-pressed={priceGrade === k} onClick={() => setPriceGrade(k)} style={{
-                        background: priceGrade === k ? `${col}22` : C.panel2,
-                        border: `1px solid ${priceGrade === k ? col : C.border}`,
-                        color: priceGrade === k ? col : C.sub, borderRadius: 8, padding: "5px 12px",
-                        fontSize: 12, fontWeight: priceGrade === k ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }}>
-                        {lb}
-                      </button>
-                    ))}
-                    <button onClick={copyPricesToOther} title="현재 탭의 가격을 다른 등급 탭에 덮어씀" style={{
-                      background: "none", border: `1px solid ${C.border}`, color: C.sub, borderRadius: 8,
-                      padding: "5px 10px", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
-                      → {priceGrade === "u" ? "레전" : "유니크"} 탭에 복사
-                    </button>
-                  </div>
-                </div>
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
+              <section className="trade-price-section">
+                <h3>스탯 합계</h3>
+                <div className="trade-price-table-scroll">
+                  <table className="trade-price-matrix">
                     <thead><tr>
                       <th style={{ textAlign: "left", color: C.sub, padding: 4 }}></th>
                       {thresholds.map((t) => <th key={t} style={{ color: C.sub, fontWeight: 600, padding: 4 }}>{t}%↑</th>)}
@@ -480,68 +438,78 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
-                <div style={{ fontSize: 11, color: C.sub, marginTop: 6 }}>
+                <p className="trade-price-help">
                   {priceGrade === "u" ? "유니크 등급 매물" : "레전드리 등급 매물"} 기준 시세를 입력하세요 — 같은 24%라도 등급에 따라 시세가 달라 따로 받아요 ·
                   매물 수치가 속한 구간(기준치 이상 ~ 같은 행의 다음 입력 기준치 미만)의 가격으로 판매 · 여러 행 동시 충족 시 최고가 적용 · MaxHP엔 올스탯 미합산 ·
                   올스탯 행은 올스탯% 줄만의 합계(제논용, 단일 스탯 줄 미포함)이라 기준치가 달라요
-                </div>
-              </CalculatorCard>
+                </p>
+              </section>
             )}
             {(part === "hat" || part === "glove") && (
-              <CalculatorCard as="div" >
-                <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em", marginBottom: 8 }}>
+              <section className="trade-price-section">
+                <h3>
                   {part === "hat" ? "모자 특수 잠재 (쿨감, 레전드리 전용)" : "장갑 특수 잠재 (크뎀, 레전드리 전용)"}
-                </div>
+                </h3>
                 {(part === "hat" ? hatRows : gloveRows).map((r, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
+                  <div key={i} className="trade-price-combination">
                     {part === "hat" ? (
+                      <label>쿨감 합계
                       <select aria-label={`모자 ${i + 1}번 조합의 쿨감 (초)`} value={r.cd} onChange={(e) => setHatRows(hatRows.map((x, k) => k === i ? { ...x, cd: +e.target.value } : x))} style={{ ...inputStyle, width: 110 }}>
                         {[2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>쿨감 {n}초↑</option>)}
                       </select>
+                      </label>
                     ) : (
+                      <label>크뎀 합계
                       <select aria-label={`장갑 ${i + 1}번 조합의 크리티컬 데미지 (%)`} value={r.crit} onChange={(e) => setGloveRows(gloveRows.map((x, k) => k === i ? { ...x, crit: +e.target.value } : x))} style={{ ...inputStyle, width: 110 }}>
                         {[8, 16, 24].map((n) => <option key={n} value={n}>크뎀 {n}%↑</option>)}
                       </select>
+                      </label>
                     )}
+                    <label>최소 스탯 합계
                     <select aria-label={`${part === "hat" ? "모자" : "장갑"} ${i + 1}번 조합의 최소 스탯 (%)`} value={r.statMin}
                       onChange={(e) => (part === "hat" ? setHatRows(hatRows.map((x, k) => k === i ? { ...x, statMin: +e.target.value } : x))
                         : setGloveRows(gloveRows.map((x, k) => k === i ? { ...x, statMin: +e.target.value } : x)))}
                       style={{ ...inputStyle, width: 130 }}>
                       {[...new Set([...statMinOpts, r.statMin])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{m === 0 ? "스탯 무관" : `+ 스탯 ${m}%↑`}</option>)}
                     </select>
+                    </label>
                     {r.statMin > 0 && (
+                      <label>주스탯
                       <select aria-label={`${part === "hat" ? "모자" : "장갑"} ${i + 1}번 조합의 주스탯`} value={r.stat || "STR"}
                         onChange={(e) => (part === "hat" ? setHatRows(hatRows.map((x, k) => k === i ? { ...x, stat: e.target.value } : x))
                           : setGloveRows(gloveRows.map((x, k) => k === i ? { ...x, stat: e.target.value } : x)))}
                         style={{ ...inputStyle, width: 76 }}>
                         {STATS.map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
+                      </label>
                     )}
+                    <label className="trade-price-sale-field">판매가 (억 메소)
                     <Num label={`${part === "hat" ? "모자" : "장갑"} ${i + 1}번 조합의 판매가 (억 메소)`} w={80} value={r.price} ph="가격(억)"
                       onChange={(v) => (part === "hat" ? setHatRows(hatRows.map((x, k) => k === i ? { ...x, price: v } : x))
                         : setGloveRows(gloveRows.map((x, k) => k === i ? { ...x, price: v } : x)))} />
-                    <button aria-label={`${part === "hat" ? "모자" : "장갑"} ${i + 1}번 조합 삭제`} onClick={() => (part === "hat" ? setHatRows(hatRows.filter((_, k) => k !== i)) : setGloveRows(gloveRows.filter((_, k) => k !== i)))}
-                      style={{ background: "none", border: "none", color: C.sub, cursor: "pointer", fontSize: 14 }}>✕</button>
+                    </label>
+                    <button type="button" className="trade-price-remove" aria-label={`${part === "hat" ? "모자" : "장갑"} ${i + 1}번 조합 삭제`}
+                      onClick={() => (part === "hat" ? setHatRows(hatRows.filter((_, k) => k !== i)) : setGloveRows(gloveRows.filter((_, k) => k !== i)))}>삭제</button>
                   </div>
                 ))}
-                <button onClick={() => (part === "hat" ? setHatRows([...hatRows, { cd: 2, statMin: 0, stat: "STR", price: "" }]) : setGloveRows([...gloveRows, { crit: 8, statMin: 0, stat: "STR", price: "" }]))}
-                  style={{ ...inputStyle, width: "auto", cursor: "pointer", color: C.accent }}>+ 조합 추가</button>
-              </CalculatorCard>
+                <button type="button" className="trade-price-add-row" onClick={() => (part === "hat" ? setHatRows([...hatRows, { cd: 2, statMin: 0, stat: "STR", price: "" }]) : setGloveRows([...gloveRows, { crit: 8, statMin: 0, stat: "STR", price: "" }]))}>＋ 조합 추가</button>
+              </section>
             )}
             {part === "acc" && (
-              <CalculatorCard as="div" >
-                <div style={{ fontSize: 16, color: C.text, fontWeight: 750, letterSpacing: "-.02em", marginBottom: 8 }}>
+              <section className="trade-price-section">
+                <h3>
                   장신구 드메 잠재 (레전드리 전용, 줄당 20%)
-                </div>
-                <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+                </h3>
+                <div className="trade-price-accessory-fields">
                   {[["drop2", "드랍 2줄↑"], ["meso2", "메획 2줄↑"], ["dropmeso", "드랍+메획 각1줄↑"], ["dm3", "드메 합 3줄"]].map(([k, lb]) => (
-                    <label key={k} style={{ fontSize: 12, color: C.sub }}>{lb}
-                      <Num w={90} value={accPrices[k]} ph="가격(억)" onChange={(v) => setAccPrices({ ...accPrices, [k]: v })} />
+                    <label key={k}>{lb}
+                      <Num label={`레전드리 ${lb} 판매가 (억 메소)`} w={90} value={accPrices[k]} ph="가격(억)" onChange={(v) => setAccPrices({ ...accPrices, [k]: v })} />
                     </label>
                   ))}
                 </div>
-              </CalculatorCard>
+              </section>
             )}
+            </TradePriceEditor>
 
             {/* 결과 */}
             <CalculateButton disabled={!targets.u.length && !targets.l.length}

@@ -20,7 +20,6 @@
 @media (max-width: 950px) { .potential-layout { grid-template-columns: 310px minmax(0, 1fr); } }
 @media (max-width: 740px) {
   .potential-layout { grid-template-columns: minmax(0, 1fr); }
-  .potential-results > div:first-child { flex-wrap: wrap; }
   .potential-grade-path { margin-bottom: 25px; }
   .potential-grade-steps { gap: 12px; }
 }

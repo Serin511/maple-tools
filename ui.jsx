@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { ADDITIONAL_SUBSTATS, DEFAULT_ADDITIONAL_EFFICIENCY } from './additional-data.mjs';
 
 /** Shared page framing keeps calculator navigation and headings consistent. */
@@ -54,6 +55,91 @@ export function NumericField({ label, value, onChange, unit, scale = 1, min = 0,
       onChange={event => onChange(event.target.value === '' ? '' : Number(event.target.value) / scale)} {...props} />
     {unit && <span className="calculator-input-suffix">{unit}</span>}
   </span>;
+}
+
+const TRADE_EQUIPMENT_LABELS = Object.freeze({
+  purchase: '노작 매입가 (억 메소)',
+  level: '레벨 제한',
+  part: '착용 부위',
+  startGrade: '시작 등급',
+  fee: '경매장 수수료 (%)',
+  floorPrice: '레전 깡통·잡옵 처분가 (억, 폴백용)',
+});
+
+/** Trading calculators share the equipment workflow; monetary values use meso. */
+export function TradeEquipmentSettings({ values, onChange, levelOptions, partOptions, startGradeOptions,
+  pityFields = [], labels = {}, purchaseLabel = TRADE_EQUIPMENT_LABELS.purchase, purchaseHelp, children, className = '' }) {
+  const fieldLabel = key => labels[key] || TRADE_EQUIPMENT_LABELS[key];
+  const selectValue = (key, options, event) => {
+    const option = options.find(item => String(item.value) === event.target.value);
+    if (option) onChange({ [key]: option.value });
+  };
+  return <CalculatorCard className={`calculator-trade-equipment ${className}`.trim()}>
+    <h2>장비 설정</h2>
+    <label className="calculator-trade-field">{purchaseLabel}
+      <NumericField label={labels.purchase || purchaseLabel} value={values.itemPrice} scale={1e-8}
+        onChange={itemPrice => onChange({ itemPrice })} />
+      {purchaseHelp && <span className="calculator-trade-help">{purchaseHelp}</span>}
+    </label>
+    <label className="calculator-trade-field">{TRADE_EQUIPMENT_LABELS.level}
+      <select aria-label={fieldLabel('level')} value={values.level} onChange={event => selectValue('level', levelOptions, event)}>
+        {levelOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </label>
+    <label className="calculator-trade-field">{TRADE_EQUIPMENT_LABELS.part}
+      <select aria-label={fieldLabel('part')} value={values.part} onChange={event => selectValue('part', partOptions, event)}>
+        {partOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </label>
+    {startGradeOptions && <label className="calculator-trade-field">{TRADE_EQUIPMENT_LABELS.startGrade}
+      <select aria-label={fieldLabel('startGrade')} value={values.startGrade}
+        onChange={event => selectValue('startGrade', startGradeOptions, event)}>
+        {startGradeOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </label>}
+    <PityStackFields fields={pityFields} />
+    <label className="calculator-trade-field">{TRADE_EQUIPMENT_LABELS.fee}
+      <NumericField label={fieldLabel('fee')} value={values.fee} max={100} onChange={fee => onChange({ fee })} />
+    </label>
+    <label className="calculator-trade-field">{TRADE_EQUIPMENT_LABELS.floorPrice}
+      <NumericField label={labels.floorPrice || labels.floor || TRADE_EQUIPMENT_LABELS.floorPrice} value={values.floorPrice}
+        scale={1e-8} onChange={floorPrice => onChange({ floorPrice })} />
+    </label>
+    {children}
+  </CalculatorCard>;
+}
+
+/** Per-grade costs stay visible and editable beside the equipment settings. */
+export function TradeResetCostSettings({ costs, note, title = '재설정 비용', className = '' }) {
+  return <CalculatorCard className={`calculator-trade-reset-costs ${className}`.trim()}>
+    <h2>{title}</h2>
+    {costs.map(cost => <label className="calculator-trade-cost-row" key={cost.key}>
+      <span style={{ color: cost.color }}>{cost.label}</span>
+      <NumericField label={cost.ariaLabel || `${cost.label} 재설정 비용 (메소)`} value={cost.value} onChange={cost.onChange} />
+    </label>)}
+    {note && <p className="calculator-trade-help">{note}</p>}
+  </CalculatorCard>;
+}
+
+export function PityStackFields({ fields }) {
+  return fields.map(field => <label className="calculator-trade-field" key={field.key}>{field.label}
+    <NumericField label={field.ariaLabel || field.label} value={field.value} max={field.max} step="1"
+      inputMode="numeric" onChange={field.onChange} />
+  </label>);
+}
+
+/** A shared switch keeps trading policy controls consistent and accessible. */
+export function ToggleField({ on, onChange, label, color = 'var(--ui-accent)', description }) {
+  const descriptionId = useId();
+  return <div className="calculator-toggle-field">
+    <button type="button" className="calculator-toggle" role="switch" aria-checked={on} onClick={() => onChange(!on)}
+      aria-describedby={description ? descriptionId : undefined}
+      style={{ '--calculator-toggle-color': color }}>
+      <span className="calculator-toggle-track" aria-hidden="true"><span /></span>
+      <span>{label}</span>
+    </button>
+    {description && <p id={descriptionId} className="calculator-toggle-description">{description}</p>}
+  </div>;
 }
 
 export const CHARACTER_EFFICIENCY_FIELDS = Object.freeze([

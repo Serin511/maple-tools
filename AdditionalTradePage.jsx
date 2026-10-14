@@ -1,4 +1,5 @@
-import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, NumericField, CharacterEfficiencySettings, PresetControls } from './ui.jsx';
+import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, NumericField, CharacterEfficiencySettings, PresetControls, TradeEquipmentSettings, TradeResetCostSettings, ToggleField } from './ui.jsx';
+import { TradePriceEditor } from './TradePriceEditor.jsx';
 import { useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_ADDITIONAL_TRADE_SETTINGS,
@@ -51,7 +52,7 @@ function normalizeSettings(saved) {
     ...defaults, ...saved,
     efficiency: { ...defaults.efficiency, ...record(saved.efficiency) },
     costs: { ...defaults.costs, ...record(saved.costs) },
-    upRates: { ...defaults.upRates, ...record(saved.upRates) }, pity: { ...defaults.pity, ...record(saved.pity) },
+    upRates: { ...defaults.upRates }, pity: { ...defaults.pity },
     stacks: { ...defaults.stacks, ...record(saved.stacks) }, prices, priceBanks,
   };
 }
@@ -71,14 +72,14 @@ function PriceRows({ rows, grade, settings, onChange, onAdd, onRemove }) {
   return <div className="at-price-list">
     {!rows.length && <p className="at-empty-rows">가격 조건이 없습니다. 목표 스탯과 최소 환산값을 추가해 시세를 입력하세요.</p>}
     {rows.map((row, index) => <div className={`at-price-row ${settings.slot !== '모자' && !(settings.slot === '장갑' && settings.separateCrit) ? 'at-plain-price-row' : ''}`} key={row.id}>
-      <label><span className="at-visually-hidden">{grade || '공통'} {index + 1}번 조건의 주스탯</span><select aria-label={`${grade || '공통'} ${index + 1}번 가격 조건의 주스탯`} value={row.stat} onChange={event => onChange(row.id, { stat: event.target.value })}>{stats.map(stat => <option key={stat}>{stat}</option>)}</select></label>
+      <label><span>주스탯</span><select aria-label={`${grade || '공통'} ${index + 1}번 가격 조건의 주스탯`} value={row.stat} onChange={event => onChange(row.id, { stat: event.target.value })}>{stats.map(stat => <option key={stat}>{stat}</option>)}</select></label>
       <label className="at-min-wrap"><span>최소 스탯 환산</span><Numeric label={`${grade || '공통'} ${index + 1}번 가격 조건의 최소 스탯 환산 (%)`} value={row.min} unit="%급 이상" onChange={value => onChange(row.id, { min: value })} /></label>
       {settings.slot === '모자' && <label><span>쿨감 합계</span><select aria-label={`${grade || '공통'} ${index + 1}번 조건의 쿨감 합계 이상`} value={row.cd ?? 0} onChange={event => onChange(row.id, { cd: Number(event.target.value) })}>{[0, 1, 2, 3].map(n => <option value={n} key={n}>{n === 0 ? '제한 없음' : `${n}초 이상`}</option>)}</select></label>}
       {settings.slot === '장갑' && settings.separateCrit && <label><span>크뎀 합계</span><select aria-label={`${grade || '공통'} ${index + 1}번 조건의 크리티컬 데미지 합계 이상`} value={row.crit ?? 0} onChange={event => onChange(row.id, { crit: Number(event.target.value) })}>{critTotals.map(n => <option value={n} key={n}>{n === 0 ? '제한 없음' : `${n}% 이상`}</option>)}</select></label>}
-      <label className="at-price-input"><span>시세</span><Numeric label={`${grade || '공통'} ${index + 1}번 가격 조건의 시세 (억 메소)`} value={row.price} scale={1e-8} unit="억 메소" onChange={value => onChange(row.id, { price: value })} /></label>
-      <button className="at-remove" type="button" aria-label={`${grade || '공통'} ${index + 1}번 가격 조건 삭제`} onClick={() => onRemove(row.id)}>삭제</button>
+      <label className="at-price-input"><span>판매가</span><Numeric label={`${grade || '공통'} ${index + 1}번 가격 조건의 시세 (억 메소)`} value={row.price} scale={1e-8} unit="억 메소" onChange={value => onChange(row.id, { price: value })} /></label>
+      <button className="at-remove trade-price-remove" type="button" aria-label={`${grade || '공통'} ${index + 1}번 가격 조건 삭제`} onClick={() => onRemove(row.id)}>삭제</button>
     </div>)}
-    <button type="button" className="at-add-row" onClick={onAdd}>＋ 가격 조건 추가</button>
+    <button type="button" className="at-add-row trade-price-add-row" onClick={onAdd}>＋ 가격 조건 추가</button>
   </div>;
 }
 
@@ -167,6 +168,12 @@ export default function AdditionalTradePage() {
     const nextPrices = banks[key] || emptyPriceLists();
     change({ ...patch, prices: nextPrices, priceBanks: banks });
   }
+  function changeEquipment(patch) {
+    const { part, ...values } = patch;
+    if (Object.hasOwn(values, 'level')) values.costs = resetAdditionalCosts(values.level);
+    if (Object.hasOwn(patch, 'part')) changePriceScope({ ...values, slot: part });
+    else change(values);
+  }
   function changeNested(key, name, value) { change({ [key]: { ...settings[key], [name]: value } }); }
   function listFor(grade) { return settings.prices[settings.separateGrades ? grade : 'shared'] || []; }
   function updateRow(grade, id, patch) { const key = settings.separateGrades ? grade : 'shared'; change({ prices: { ...settings.prices, [key]: settings.prices[key].map(row => row.id === id ? { ...row, ...patch } : row) } }); }
@@ -200,31 +207,28 @@ export default function AdditionalTradePage() {
   return <main className="flame-page at-page calculator-page">
     <CalculatorHeader className="flame-header" eyebrow="ADDITIONAL TRADE" scope="방어구 · 장신구"
       title={<>에디셔널 <em>잠재능력 장사</em></>}
-      description={<>에디셔널 잠재능력 재설정의 기대 수익을 계산합니다.<br />목표 성능별 시세와 등급업 확률을 입력해 매물당 순이익을 확인하세요.</>} />
+      description={<>에디셔널 잠재능력 재설정의 기대 수익을 계산합니다.<br />매입가·판매가·재설정 비용을 입력해 매물당 순이익을 확인하세요.</>} />
     <div className="flame-layout at-layout calculator-layout">
       <section className="flame-settings calculator-settings" aria-label="에디셔널 잠재능력 장사 계산 설정">
-        <CalculatorCard as="div" className="flame-card"><div className="flame-section-title"><h2>매물과 재설정 비용</h2><span className="flame-pill">기본 입력</span></div>
-          <div className="additional-field-grid">
-            <label className="additional-field">장비 부위<select value={settings.slot} aria-label="대상 아이템 부위" onChange={event => changePriceScope({ slot: event.target.value })}>{ADDITIONAL_SLOTS.map(slot => <option key={slot}>{slot}</option>)}</select></label>
-            <label className="additional-field">아이템 레벨<select aria-label="아이템 레벨 제한" value={settings.level} onChange={event => { const level = Number(event.target.value); change({ level, costs: resetAdditionalCosts(level) }); }}>{ADDITIONAL_LEVELS.map(level => <option value={level} key={level}>{level}레벨</option>)}</select></label>
-            <label className="additional-field">시작 등급<select value={settings.startGrade} aria-label="재설정 시작 등급" onChange={event => change({ startGrade: event.target.value })}>{ADDITIONAL_GRADES.map(grade => <option key={grade}>{grade}</option>)}</select></label>
-          </div>
-          <div className="at-cost-fields">
-            <label className="flame-field-label">시작 등급 깡통 매입가<Numeric label="시작 등급 깡통 매입가 (억 메소)" value={settings.itemPrice} scale={1e-8} unit="억 메소" onChange={value => change({ itemPrice: value })} /></label>
-            <label className="flame-field-label">경매장 수수료<Numeric label="경매장 수수료 (%)" value={settings.fee} unit="%" max={100} onChange={value => change({ fee: value })} /></label>
-            <label className="flame-field-label">레전드리 잡옵 처분가<Numeric label="레전드리 잡옵 처분가 (억 메소)" value={settings.floorPrice} scale={1e-8} unit="억 메소" onChange={value => change({ floorPrice: value })} /></label>
-          </div>
-          <p className="flame-small-note">에디셔널 {settings.startGrade} 등급에서 목표 옵션이 없는 아이템의 매입가를 입력하세요.</p>
-          <label className="additional-check"><input type="checkbox" checked={settings.miracle} onChange={event => change({ miracle: event.target.checked })} /><span>미라클 타임<span>설정한 등급업 기본 확률의 2배 적용</span></span></label>
-          <label className="additional-check"><input type="checkbox" checked={settings.autoSell} onChange={event => change({ autoSell: event.target.checked })} /><span>판매·재설정 자동 최적화<span>켜면 다음 재설정 결과마다 기대 순이익이 높은 행동을 선택합니다. 끄면 가격 조건에 맞는 즉시 판매합니다.</span></span></label>
-        </CalculatorCard>
-
-        <CalculatorCard as="div" className="flame-card"><div className="flame-section-title"><h2>가격 조건</h2><button type="button" className="flame-text-button" onClick={() => change({ separateGrades: !settings.separateGrades })}>{settings.separateGrades ? '등급 공통 가격으로 전환' : '등급별 가격 입력으로 전환'}</button></div>
-          <p className="flame-muted">같은 스탯·특수옵션 조건에서는 도달한 가장 높은 스탯 기준 구간의 가격을 적용하고, 서로 다른 조건 사이에서는 최고가 하나를 적용합니다.</p>
-          {settings.slot === '장갑' && <label className="additional-check"><input type="checkbox" checked={settings.separateCrit} onChange={event => changePriceScope({ separateCrit: event.target.checked })} /><span>크리티컬 데미지 합계로 분리해 가격 입력<span>켜면 크뎀 조건을 별도로 지정합니다. 끄면 설정한 환산 효율로 스탯%에 합산합니다.</span></span></label>}
-          {settings.separateGrades && <div className="at-grade-picker"><span>가격 조건을 입력할 등급</span><div role="tablist" aria-label="가격 조건을 입력할 등급" className="at-grade-tabs">{ADDITIONAL_GRADES.map(grade => <button role="tab" aria-selected={priceGrade === grade} type="button" key={grade} onClick={() => setPriceGrade(grade)}>{grade}</button>)}</div><small>시작 등급과 무관하게 세 등급의 가격을 각각 저장할 수 있습니다. 계산에는 시작 등급 이상의 가격만 사용합니다.</small></div>}
-          {gradeCards.map(grade => <section className="at-grade-prices" key={grade || 'shared'}><h3>{grade ? `${grade} 가격 조건` : '모든 등급 공통 가격 조건'}</h3><PriceRows rows={listFor(grade)} grade={grade} settings={settings} onChange={(id, patch) => updateRow(grade, id, patch)} onAdd={() => addRow(grade)} onRemove={id => removeRow(grade, id)} /></section>)}
-          <p className="flame-small-note">시세 행은 기본으로 추가하지 않습니다. 가격을 알고 있는 목표 성능만 직접 등록해 주세요. 목표값은 소수점 입력이 가능합니다.</p>
+        <TradeEquipmentSettings values={{ itemPrice: settings.itemPrice, level: settings.level, part: settings.slot,
+          startGrade: settings.startGrade, fee: settings.fee, floorPrice: settings.floorPrice }} onChange={changeEquipment}
+          levelOptions={ADDITIONAL_LEVELS.map(value => ({ value, label: `${value}제` }))}
+          partOptions={ADDITIONAL_SLOTS.map(value => ({ value, label: value }))}
+          startGradeOptions={ADDITIONAL_GRADES.map(value => ({ value, label: value }))}
+          purchaseLabel="시작 등급 깡통 매입가 (억 메소)"
+          purchaseHelp={`에디셔널 ${settings.startGrade} 등급에서 목표 옵션이 없는 아이템의 매입가를 입력하세요.`}
+          labels={{ purchase: '시작 등급 깡통 매입가 (억 메소)', level: '아이템 레벨 제한', part: '대상 아이템 부위',
+            startGrade: '재설정 시작 등급', floorPrice: '레전드리 잡옵 처분가 (억 메소)' }}
+          pityFields={['에픽', '유니크'].filter(grade => ADDITIONAL_GRADES.indexOf(grade) >= ADDITIONAL_GRADES.indexOf(settings.startGrade))
+            .map(grade => ({ key: grade, label: `현재 ${grade === '에픽' ? '에→유' : '유→레'} 천장 스택${Number.isInteger(settings.pity[grade]) ? ` (0~${settings.pity[grade]})` : ''}`,
+              ariaLabel: `${grade} 현재 등급업 실패 스택`, value: settings.stacks[grade], max: settings.pity[grade],
+              onChange: value => changeNested('stacks', grade, value) }))} />
+        <CalculatorCard as="div" className="calculator-trade-toggles">
+          <ToggleField on={settings.miracle} onChange={miracle => change({ miracle })}
+            label="미라클데이 (등급업 확률 ×2)" color="#f2c744" />
+          <ToggleField on={settings.autoSell} onChange={autoSell => change({ autoSell })}
+            label="판매·재설정 자동 최적화"
+            description="켜면 다음 재설정 결과마다 기대 순이익이 높은 행동을 선택합니다. 끄면 가격 조건에 맞는 즉시 판매합니다." />
         </CalculatorCard>
 
         <CalculatorCard as="div" className="flame-card">
@@ -232,30 +236,42 @@ export default function AdditionalTradePage() {
             criticalDamageDisabled={settings.slot === '장갑' && settings.separateCrit} />
         </CalculatorCard>
 
-        <CalculatorCard as="details" className="flame-card additional-rules at-rules"><summary><span>확률·재설정 규칙</span><span className="additional-rule-badge">자동 입력 · 조정 가능</span></summary>
-          <p className="flame-small-note">에디셔널 메소 재설정만 계산합니다. 가격 행이 없는 성능은 판매 대상으로 보지 않습니다.</p>
-          <h3>등급별 재설정 1회 비용</h3><div className="additional-rule-fields">{ADDITIONAL_GRADES.map(grade => <label key={grade}><span>{grade}</span><Numeric label={`${grade} 재설정 1회 비용`} value={settings.costs[grade]} unit="메소" onChange={value => changeNested('costs', grade, value)} /></label>)}</div>
-          {['에픽', '유니크'].map(grade => <div className="additional-upgrade-rule" key={grade}><h3>{grade} → {grade === '에픽' ? '유니크' : '레전드리'}</h3>
-            <label className="additional-rule-row"><span>등급업 기본 확률</span><Numeric label={`${grade} 등급업 확률 (%)`} value={settings.upRates[grade]} scale={100} max={100} unit="%" onChange={value => changeNested('upRates', grade, value)} /></label>
-            <label className="additional-rule-row"><span>확정 등급업까지 실패 횟수</span><Numeric label={`${grade} 확정 등급업 실패 횟수`} value={settings.pity[grade]} step="1" unit="회" onChange={value => changeNested('pity', grade, value)} /></label>
-            <label className="additional-rule-row"><span>현재 실패 스택</span><Numeric label={`${grade} 현재 등급업 실패 스택`} value={settings.stacks[grade]} step="1" unit="회" onChange={value => changeNested('stacks', grade, value)} /></label>
-          </div>)}
-          <p className="flame-small-note">현재 스택은 해당 등급에서 누적한 실패 횟수입니다. 등급업 후에도 해당 등급의 스택 정보를 이어 계산합니다.</p>
-        </CalculatorCard>
         <CalculatorCard as="div" className="flame-card at-presets"><div className="flame-section-title"><h2>입력 프리셋</h2><span>현재 설정 저장</span></div>
           <PresetControls names={Object.keys(presets)} presetName={presetName} setPresetName={setPresetName}
             selectedName={presetSel} onSelect={name => { setPresetSel(name); if (name) change(normalizeSettings(presets[name])); }}
             onSave={addNewPreset} onDelete={deletePreset} />
         </CalculatorCard>
-        <CalculateButton className="flame-calculate" type="button" onClick={calculate}>{busy ? '현재 조건으로 다시 계산' : '장사 기대 수익 계산'}<span aria-hidden="true">→</span></CalculateButton>
-        <p className="flame-status calculator-status" role="status" aria-live="polite">{progress}</p>{error && <p className="flame-error" role="alert">{error}</p>}
+        <TradeResetCostSettings costs={ADDITIONAL_GRADES.map((grade, index) => ({ key: grade, label: grade,
+          color: ['#b07df7', '#f2c744', '#79e07d'][index], value: settings.costs[grade],
+          ariaLabel: `${grade} 재설정 1회 비용`, onChange: value => changeNested('costs', grade, value),
+        }))} note={`기본값: 에디셔널 메소 재설정 비용 (${settings.level}제 구간). 할인 비용은 직접 수정할 수 있습니다. 등급업 확률·천장은 고정값을 적용합니다.`} />
       </section>
       <section className="flame-results at-results calculator-results" aria-label="에디셔널 장사 계산 결과" aria-busy={busy}>
-        {!result && <CalculatorCard as="div" className="flame-card flame-empty"><div className="flame-empty-icon" aria-hidden="true">◇</div><h2>{busy ? '등급별 판매 조건과 재설정 비용을 계산하고 있습니다' : '매물당 기대 수익을 계산하세요'}</h2><p>등록한 성능별 시세, 매입가, 수수료와 재설정 비용을 반영합니다.</p>{busy && <div className="flame-progress" />}<div className="flame-empty-steps"><span>가격 조건</span><i>＋</i><span>옵션 확률</span><i>−</i><span>재설정 비용</span></div></CalculatorCard>}
+        <TradePriceEditor description="같은 스탯·특수옵션 조건에서는 도달한 가장 높은 스탯 기준 구간의 가격을 적용하고, 서로 다른 조건 사이에서는 최고가 하나를 적용합니다."
+          actions={<button type="button" className="trade-price-action" onClick={() => change({ separateGrades: !settings.separateGrades })}>
+            {settings.separateGrades ? '등급 공통 가격으로 전환' : '등급별 가격 입력으로 전환'}</button>}
+          controls={settings.slot === '장갑' && <label className="additional-check"><input type="checkbox" checked={settings.separateCrit}
+            onChange={event => changePriceScope({ separateCrit: event.target.checked })} />
+            <span>크리티컬 데미지 합계로 분리해 가격 입력<span>켜면 크뎀 조건을 별도로 지정합니다. 끄면 설정한 환산 효율로 스탯%에 합산합니다.</span></span></label>}
+          gradeOptions={settings.separateGrades ? ADDITIONAL_GRADES.map((grade, index) => ({ value: grade, label: `${grade} 매물 가격`,
+            color: ['#b07df7', '#f2c744', '#79e07d'][index] })) : []}
+          gradeValue={priceGrade} onGradeChange={setPriceGrade}
+          gradeHelp="시작 등급과 무관하게 세 등급의 가격을 각각 저장할 수 있습니다. 계산에는 시작 등급 이상의 가격만 사용합니다."
+          persistenceNote="판매가는 부위와 크뎀 분리 설정별로 저장되어, 설정을 다시 선택하면 이전 입력을 불러옵니다.">
+          {gradeCards.map(grade => <section className="trade-price-section" key={grade || 'shared'}>
+            <h3>{grade ? `${grade} 판매가` : '모든 등급 공통 판매가'}</h3>
+            <PriceRows rows={listFor(grade)} grade={grade} settings={settings} onChange={(id, patch) => updateRow(grade, id, patch)}
+              onAdd={() => addRow(grade)} onRemove={id => removeRow(grade, id)} />
+          </section>)}
+          <p className="trade-price-help">시세 행은 기본으로 추가하지 않습니다. 가격을 알고 있는 목표 성능만 직접 등록해 주세요. 목표값은 소수점 입력이 가능합니다.</p>
+        </TradePriceEditor>
+        <CalculateButton type="button" onClick={calculate}>{busy ? '현재 조건으로 다시 계산' : '장사 기대 수익 계산'}<span aria-hidden="true">→</span></CalculateButton>
+        <p className="flame-status calculator-status" role="status" aria-live="polite">{progress}</p>{error && <p className="flame-error" role="alert">{error}</p>}
+        {!result && <CalculatorCard as="div" className="flame-card flame-empty"><div className="flame-empty-icon" aria-hidden="true">◇</div><h2>{busy ? '등급별 판매 조건과 재설정 비용을 계산하고 있습니다' : '매물당 기대 수익을 계산하세요'}</h2><p>등록한 성능별 시세, 매입가, 수수료와 재설정 비용을 반영합니다.</p>{busy && <div className="flame-progress" />}<div className="flame-empty-steps"><span>판매가</span><i>＋</i><span>옵션 확률</span><i>−</i><span>재설정 비용</span></div></CalculatorCard>}
         {result && <><CalculatorCard as="div" className="flame-card"><div className="flame-section-title"><h2>계산 결과</h2><span>현재 설정 · 장기 평균</span></div><ResultSummary result={result} settings={settings} /></CalculatorCard>
           {(result.warnings?.length > 0 || result.limits?.length > 0) && <CalculatorCard as="details" className="flame-card flame-assumptions at-assumptions" open><summary>계산 범위와 주의사항</summary><ul>{[...(result.warnings || []), ...(result.limits || [])].map((warning, i) => <li key={i}>{warning}</li>)}</ul></CalculatorCard>}
         </>}
-        <CalculatorCard as="details" className="flame-card flame-assumptions at-assumptions"><summary>계산 방법과 가정</summary><ul><li>현재 매물은 시작 등급과 입력한 등급업 스택에서 시작합니다. 판매 후에는 같은 시작 등급으로 다음 매물을 매입합니다.</li><li>등급업은 입력한 확률과 천장을 반영합니다. 시작 등급이 유니크 또는 레전드리면 그 아래 등급은 계산하지 않습니다.</li><li>여러 가격 조건에 해당하면 가장 높은 판매가 하나를 적용합니다. 레전드리 잡옵 처분가는 자동 최적화 여부에 따라 적용 범위가 달라지며, 결과 위 안내를 따릅니다.</li><li>모자는 쿨감 합계 이상, 장갑은 선택에 따라 크리티컬 데미지 합계 이상으로 조건을 나눕니다. 드롭률·메소 획득량은 가격 가치에 포함하지 않습니다.</li><li>올스탯 환산은 일반 직업의 주스탯 기준입니다. 제논과 데몬어벤져 전용 가치는 계산하지 않습니다.</li><li>공개된 에디셔널 재설정 옵션 확률표를 기반으로 하며, 데이터 범위와 계산 가정은 위 경고에 표시합니다.</li></ul></CalculatorCard>
+        <CalculatorCard as="details" className="flame-card flame-assumptions at-assumptions"><summary>계산 방법과 가정</summary><ul><li>현재 매물은 시작 등급과 장비 설정에 입력한 등급업 실패 스택에서 시작합니다. 판매 후에는 같은 시작 등급으로 다음 매물을 매입합니다.</li><li>등급업 확률과 천장은 게임의 고정 규칙을 적용하며, 미라클데이에는 등급업 확률이 2배가 됩니다. 시작 등급이 유니크 또는 레전드리면 그 아래 등급은 계산하지 않습니다.</li><li>여러 가격 조건에 해당하면 가장 높은 판매가 하나를 적용합니다. 레전드리 잡옵 처분가는 자동 최적화 여부에 따라 적용 범위가 달라지며, 결과 위 안내를 따릅니다.</li><li>모자는 쿨감 합계 이상, 장갑은 선택에 따라 크리티컬 데미지 합계 이상으로 조건을 나눕니다. 드롭률·메소 획득량은 가격 가치에 포함하지 않습니다.</li><li>올스탯 환산은 일반 직업의 주스탯 기준입니다. 제논과 데몬어벤져 전용 가치는 계산하지 않습니다.</li><li>공개된 에디셔널 재설정 옵션 확률표를 기반으로 하며, 데이터 범위와 계산 가정은 위 경고에 표시합니다.</li></ul></CalculatorCard>
       </section>
     </div><CalculatorFooter className="flame-footer">메이플 계산기 · 입력값과 프리셋은 이 브라우저에 자동 저장됩니다.</CalculatorFooter>
   </main>;

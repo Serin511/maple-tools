@@ -1,6 +1,6 @@
-import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, NumericField, CharacterEfficiencySettings } from './ui.jsx';
+import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, NumericField, CharacterEfficiencySettings, TradeResetCostSettings, ToggleField, PityStackFields } from './ui.jsx';
 import { useEffect, useRef, useState } from 'react';
-import { DEFAULT_ADDITIONAL_SETTINGS, normalizeAdditionalSettings, validateAdditionalSettings, previewAdditionalScore, resetAdditionalCosts, suggestedAdditionalAppraisalCost, paidRulesIssue } from './additional-calculator.mjs';
+import { DEFAULT_ADDITIONAL_SETTINGS, normalizeAdditionalSettings, validateAdditionalSettings, previewAdditionalScore, resetAdditionalCosts, suggestedAdditionalAppraisalCost } from './additional-calculator.mjs';
 import { ADDITIONAL_SLOTS, ADDITIONAL_GRADES, ADDITIONAL_LEVELS, ADDITIONAL_SOURCES, getAdditionalLines, getAdditionalCharacterSettings } from './additional-data.mjs';
 import './flame.css';
 import './additional.css';
@@ -27,6 +27,8 @@ function loadSettings() {
     const saved = JSON.parse(localStorage.getItem(SAVE_KEY));
     if (!saved || typeof saved !== 'object') return defaults;
     const merged = normalizeAdditionalSettings(saved);
+    merged.upRates = { ...defaults.upRates };
+    merged.pity = { ...defaults.pity };
     validateAdditionalSettings(merged);
     return merged;
   } catch { return defaults; }
@@ -87,7 +89,6 @@ export default function AdditionalPage() {
   try { const value = previewAdditionalScore(settings); preview = typeof value === 'number' ? value : value?.score; } catch {}
   let lines = null;
   try { lines = getAdditionalLines({ method: 'reset', grade: settings.grade, slot: settings.slot, level: settings.level }); } catch {}
-  const paidRulesReady = !paidRulesIssue(settings);
   const recommended = result?.strategies?.find(strategy => strategy.id === result.recommendedId);
   const selected = result?.strategies?.find(strategy => strategy.id === selectedId) || recommended;
   const currentThreshold = selected?.thresholds?.find(row => row.grade === settings.grade && row.stack === (settings.stacks[settings.grade] || 0));
@@ -180,14 +181,19 @@ export default function AdditionalPage() {
       description={<>주스탯 1%에 얼마까지 쓸 수 있나요?<br />수에큐부터 등급별 재설정까지, 내 장비에서 멈출 기준을 비교합니다.</>} />
     <div className="flame-layout additional-layout calculator-layout">
       <section className="flame-settings calculator-settings" aria-label="에디셔널 전략 계산 설정">
-        <CalculatorCard as="div" className="flame-card">
-          <div className="flame-section-title"><h2>현재 장비와 에디셔널</h2><span className="flame-pill">시작점</span></div>
+        <CalculatorCard as="div" className="flame-card calculator-trade-equipment">
+          <h2>장비 설정</h2>
           <div className="additional-field-grid">
             <label className="additional-field">장비 부위<select aria-label="대상 아이템 부위" value={settings.slot} onChange={event => changeItem({ slot: event.target.value })}>{ADDITIONAL_SLOTS.map(slot => <option key={slot}>{slot}</option>)}</select></label>
             <label className="additional-field">레벨 제한<NumericInput label="아이템의 레벨 제한" value={settings.level} min={120} max={250} step="1" unit="레벨" onChange={value => changeItem({ level: value })} /></label>
           </div>
           <div className="flame-level-presets" aria-label="아이템 레벨 제한 빠른 입력">{ADDITIONAL_LEVELS.map(level => <button type="button" key={level} aria-pressed={settings.level === level} onClick={() => changeItem({ level })}>{level}</button>)}</div>
           <label className="additional-field additional-spaced">현재 에디셔널 등급<select aria-label="현재 에디셔널 잠재능력 등급" value={settings.grade} onChange={event => changeItem({ grade: event.target.value })}>{ADDITIONAL_GRADES.map(grade => <option key={grade}>{grade}</option>)}</select></label>
+          <PityStackFields fields={['에픽', '유니크']
+            .filter(grade => ADDITIONAL_GRADES.indexOf(grade) >= ADDITIONAL_GRADES.indexOf(settings.grade))
+            .map(grade => ({ key: grade, label: `현재 ${grade === '에픽' ? '에→유' : '유→레'} 천장 스택 (0~${settings.pity[grade]})`,
+              ariaLabel: `${grade} 현재 등급업 실패 스택`, value: settings.stacks[grade], max: settings.pity[grade],
+              onChange: value => changeNested('stacks', grade, value) }))} />
           <div className="additional-option-inputs">{[0, 1, 2].map(index => <label key={index}><span>{index + 1}번째 줄</span>
             <select aria-label={`현재 에디셔널 ${index + 1}번째 옵션`} value={settings.currentOptions[index]} disabled={!lines}
               onChange={event => change({ currentOptions: settings.currentOptions.map((value, line) => line === index ? event.target.value : value) })}>
@@ -218,24 +224,19 @@ export default function AdditionalPage() {
           <label className="flame-field-label">수에큐 사용 후 1회 감정 비용<NumericInput label="수상한 에디셔널 큐브 감정 비용" value={settings.strangeAppraisalCost} unit="메소" onChange={value => change({ strangeAppraisalCost: value })} /></label>
           <div className="additional-cube-cost"><span>수에큐 1회 총 비용</span><b>{settings.strangeCubePrice === '' || settings.strangeAppraisalCost === '' ? '—' : meso(settings.strangeCubePrice + settings.strangeAppraisalCost)}</b></div>
           <p className="flame-small-note">큐브 가격이 0이어도 감정 비용이 매번 필요합니다. 기본 감정 비용은 레벨 제한² × 20메소(120레벨은 × 2.5)입니다. 120제에서 통찰력 90레벨 이상으로 무료 감정이 적용되면 0으로 수정하세요.</p>
-          <label className="additional-check additional-miracle"><input type="checkbox" checked={settings.miracle} onChange={event => change({ miracle: event.target.checked })} /><span>미라클 타임<span>입력한 기본 등급업 확률의 2배 적용</span></span></label>
         </CalculatorCard>
 
-        <CalculatorCard as="details" className="flame-card additional-rules">
-          <summary><span>재설정 규칙</span><span className="additional-rule-badge">{paidRulesReady ? '자동 입력 · 조정 가능' : '입력 필요'}</span></summary>
-          <p className="flame-small-note">제공된 재설정 비용표와 등급업 규칙을 기본으로 적용합니다. 레벨 제한을 바꾸면 재설정·감정 비용을 자동 갱신합니다. 할인 등으로 실제 비용이 다르면 직접 수정하세요.</p>
-          <h3>등급별 재설정 1회 비용</h3>
-          <div className="additional-rule-fields">{ADDITIONAL_GRADES.map(grade => <label key={grade}><span>{grade}</span><NumericInput label={`${grade} 에디셔널 재설정 비용`} value={settings.costs[grade]} unit="메소" onChange={value => changeNested('costs', grade, value)} /></label>)}</div>
-          {['에픽', '유니크'].map((grade, index) => <div className="additional-upgrade-rule" key={grade}>
-            <h3>{grade} → {ADDITIONAL_GRADES[index + 1]}</h3>
-            <label className="additional-rule-row"><span>기본 등급업 확률</span><NumericInput label={`${grade} 기본 등급업 확률 (%)`} value={settings.upRates[grade]} scale={100} max={100} unit="%" onChange={value => changeNested('upRates', grade, value)} /></label>
-            <label className="additional-rule-row"><span>확정 등급업까지 실패 횟수</span><NumericInput label={`${grade} 확정 등급업까지 실패 횟수`} value={settings.pity[grade]} step="1" unit="회" onChange={value => changeNested('pity', grade, value)} /></label>
-            <label className="additional-rule-row"><span>현재 실패 스택</span><NumericInput label={`${grade} 현재 등급업 실패 스택`} value={settings.stacks[grade]} step="1" unit="회" onChange={value => changeNested('stacks', grade, value)} /></label>
-          </div>)}
-          <p className="flame-small-note">입력한 횟수만큼 등급업에 실패하면 다음 재설정에서 확정 등급업합니다. 0이면 다음 재설정에서 즉시 확정 등급업합니다. 현재 스택은 해당 등급에서 이미 누적한 등급업 실패 횟수입니다.</p>
-          <label className="additional-check"><input type="checkbox" checked={settings.retainPaid} onChange={event => change({ retainPaid: event.target.checked })} /><span>같은 등급에서는 재설정 전·후 선택 가능</span></label>
-          <p className="flame-small-note">같은 등급에서 이전 옵션을 선택할 수 있는 규칙을 반영합니다. 등급업하면 새 등급의 결과를 적용하는 모델입니다.</p>
+        <CalculatorCard as="div" className="calculator-trade-toggles">
+          <ToggleField on={settings.miracle} onChange={miracle => change({ miracle })}
+            label="미라클데이 (등급업 확률 ×2)" color="#f2c744" />
+          <ToggleField on={settings.retainPaid} onChange={retainPaid => change({ retainPaid })}
+            label="같은 등급에서는 재설정 전·후 선택 가능"
+            description="같은 등급에서는 이전 옵션을 선택할 수 있습니다. 등급업하면 새 등급의 결과를 적용합니다." />
         </CalculatorCard>
+        <TradeResetCostSettings costs={ADDITIONAL_GRADES.map((grade, index) => ({ key: grade, label: grade,
+          color: ['#b07df7', '#f2c744', '#79e07d'][index], value: settings.costs[grade],
+          ariaLabel: `${grade} 에디셔널 재설정 비용`, onChange: value => changeNested('costs', grade, value),
+        }))} note="레벨 제한을 바꾸면 재설정·감정 비용을 자동 갱신합니다. 할인 비용은 직접 수정할 수 있으며, 등급업 확률·천장은 고정값을 적용합니다." />
         <CalculateButton className="flame-calculate" type="button" onClick={calculate}>{busy ? '현재 설정으로 다시 계산' : '에디셔널 전략 비교'}<span aria-hidden="true">→</span></CalculateButton>
         <p className="flame-status calculator-status" role="status" aria-live="polite">{progress}</p>
         {error && <p className="flame-error" role="alert">{error}</p>}
@@ -306,7 +307,7 @@ export default function AdditionalPage() {
             <li>주스탯 한 종류, 부스탯 한 종류와 공격력·마력 중 하나의 효율을 반영합니다. 주스탯 %는 그대로 합산하고, 레벨 비례·고정 스탯·올스탯 옵션은 입력한 효율로 환산합니다.</li>
             <li>공개된 줄별 확률의 반올림 오차를 정규화해 조합합니다. 첨부 문서의 중복 제한 대상은 이 옵션 풀에 없습니다. 직전과 완전히 동일한 결과를 제외하는 규칙은 반영하지 않습니다.</li>
             <li>추천은 예상 상승분의 가치에서 앞으로 쓸 비용을 뺀 기대값을 최대화합니다. 이미 지출한 금액은 반영하지 않습니다. 수에큐 비용에는 개당 가격과 매회 감정 비용을 함께 반영하며, 큐브 공급 제한은 두지 않습니다.</li>
-            <li>유료 재설정은 입력한 등급업 확률·확정 등급업까지 실패 횟수·현재 실패 스택을 반영합니다. 미라클 타임은 기본 확률의 2배, 최대 100%로 적용합니다. 할인은 1회 비용에 직접 반영해 주세요.</li>
+            <li>유료 재설정은 고정 등급업 확률·천장과 장비 설정의 현재 실패 스택을 반영합니다. 미라클 타임은 기본 확률의 2배, 최대 100%로 적용합니다. 할인은 1회 비용에 직접 반영해 주세요.</li>
             <li>스탯 상한, 직업별 특수 효과, 지정하지 않은 유틸리티 옵션의 가치는 자동 반영하지 않습니다. 실제 지출은 기대값보다 커질 수 있으며 총 예산 제한은 지원하지 않습니다.</li>
           </ul>
           <div className="flame-source-links">{ADDITIONAL_SOURCES.map(source => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a>)}<a href="https://namu.wiki/w/%EC%9E%A0%EC%9E%AC%EB%8A%A5%EB%A0%A5" target="_blank" rel="noreferrer">비용·등급업 참고 문서 ↗</a></div>

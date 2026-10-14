@@ -43,10 +43,21 @@ export default function ExamplePage() {
 | `CalculateButton` | `onClick`, `disabled`, `children` | 설정으로 계산·재계산하는 기본 동작 |
 | `NumericField` | `label`, `value`, `onChange`, `unit`, `scale`, `min`, `max`, `step` | 숫자와 단위를 함께 입력. 상태는 숫자 또는 빈 문자열 |
 | `PresetControls` | `names`, `presetName`, `setPresetName`, `selectedName`, `onSelect`, `onSave`, `onDelete` | 이름·Enter 저장·선택 적용·삭제를 같은 방식으로 제공 |
+| `TradePriceEditor` | `description`, `actions`, `gradeOptions`, `gradeValue`, `onGradeChange`, `children` | 오른쪽 넓은 판매가 카드·등급 선택·시세 입력 안내를 공유 |
+| `TradeEquipmentSettings` | `values`, `onChange`, `levelOptions`, `partOptions`, `startGradeOptions`, `pityFields`, `labels` | 장사 메뉴의 매입가·장비·실패 스택·수수료·처분가를 같은 순서로 입력 |
+| `TradeResetCostSettings` | `costs`, `note` | 등급별 재설정 비용을 같은 카드·정렬로 입력 |
+| `PityStackFields` | `fields` | 현재 등급부터 도달 가능한 천장 스택을 장비 설정에서 입력 |
+| `ToggleField` | `on`, `onChange`, `label`, `color`, `description` | 미라클·판매 정책·결과 유지 옵션을 같은 스위치로 제공 |
 | `CharacterEfficiencySettings` | `settings`, `onChange`, `onMainStatChange`, `criticalDamageDisabled`, `children` | 두 에디셔널 메뉴의 공통 레벨·환산 효율 패널 |
 | `CalculatorFooter` | `children` | 기본 브라우저 저장 안내 또는 기능별 안내 |
 
 `NumericField`의 `scale`은 저장값을 화면에 표시할 배율이다. 예를 들어 메소를 억 메소로 입력하려면 `scale={1e-8}`, 1당 효율을 +10당 효율로 입력하려면 `scale={10}`이다. 빈칸을 자동으로 0으로 바꾸지 않고 검증에서 명시적으로 처리한다. 모든 입력은 보이는 label 또는 `aria-label`이 있어야 한다.
+
+장사 메뉴는 **장비 설정**에서 매입가→레벨 제한→착용 부위→시작 등급(필요한 메뉴만)→현재 실패 스택→수수료→처분가 순서를 공유한다. `TradeEquipmentSettings`의 금액은 메소 단위이며 화면에서 억 메소로 변환한다. 일반 잠재능력의 기존 억 단위 문자열 저장 형식은 페이지 어댑터에서만 변환하고, 빈 문자열을 0으로 바꾸지 않는다. 레벨·부위 선택지는 각 계산기의 실제 지원 범위를 전달한다. 현재 등급보다 낮은 스택은 화면에서 숨겨도 저장된 값을 유지한다.
+
+두 장사 메뉴의 **판매가**는 `TradePriceEditor.jsx`를 사용해 `calculator-results`의 첫 카드로 둔다. 설정 패널 옆의 넓은 영역을 쓰고, 모바일에서는 한 열의 전체 폭을 쓴다. 제목·억 메소 단위·등급 버튼·설명·입력 보존 안내와 계산 버튼 위치는 공통으로 제공한다. 일반 잠재능력의 스탯 가격표와 에디셔널의 추가·삭제 가능한 조건 행은 각 모델에 맞는 본문으로 전달한다. 등급 버튼은 `aria-pressed`로 선택을 공개하며, 페이지별 별도 카드 크기나 좁은 사이드바로 판매가 입력을 옮기지 않는다.
+
+두 에디셔널 화면의 등급업 확률과 천장 한도는 고정값이다. 설정·프리셋을 복원할 때 고정값으로 적용하며 현재 스택과 수정한 비용은 보존한다. 스택은 장비 설정에서만 수정하고, **재설정 비용**에는 비용만 둔다. 엔진의 합성 확률·천장 테스트용 API와 사용자가 조작하는 UI 설정을 구분한다.
 
 캐릭터 효율의 공통 기본값과 주스탯→부스탯 매핑은 `additional-data.mjs`에서 가져온다. 패널의 초기값·초기화 버튼·계산 엔진이 같은 기본값을 사용해야 한다. 드롭·메소는 이 환산 모델에 포함하지 않는다. 전략만의 쿨타임 환산 같은 추가 설정은 공통 패널의 `children`에 별도 영역으로 넣는다. 장사 메뉴는 네 주스탯의 가격 조건을 동시에 비교하므로 단일 주스탯 선택을 요구하지 않는다.
 
