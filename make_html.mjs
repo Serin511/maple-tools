@@ -4,6 +4,7 @@ const css = readFileSync("bundle.css", "utf8");
 const worker = JSON.stringify(readFileSync("ability-worker.js", "utf8")).replace(/</g, "\\u003c");
 const flameWorker = JSON.stringify(readFileSync("flame-worker.js", "utf8")).replace(/</g, "\\u003c");
 const additionalWorker = JSON.stringify(readFileSync("additional-worker.js", "utf8")).replace(/</g, "\\u003c");
+const additionalTradeWorker = JSON.stringify(readFileSync("additional-trade-worker.js", "utf8")).replace(/</g, "\\u003c");
 const html = `<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -18,6 +19,7 @@ const html = `<!DOCTYPE html>
 <script id="ability-worker-source" type="application/json">${worker}</script>
 <script id="flame-worker-source" type="application/json">${flameWorker}</script>
 <script id="additional-worker-source" type="application/json">${additionalWorker}</script>
+<script id="additional-trade-worker-source" type="application/json">${additionalTradeWorker}</script>
 <script>${js.replace(/<\/script/gi, "<\\/script")}</script>
 </body>
 </html>`;
