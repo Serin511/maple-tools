@@ -1,6 +1,4 @@
 .potential-page { font-size: 14px; }
-.potential-grade-path { margin-bottom: 22px; }
-.potential-grade-steps { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
 .potential-layout { grid-template-columns: 350px minmax(0, 1fr); }
 .potential-settings, .potential-results { min-width: 0; }
 .potential-settings label { display: block; line-height: 1.8; }
@@ -20,7 +18,5 @@
 @media (max-width: 950px) { .potential-layout { grid-template-columns: 310px minmax(0, 1fr); } }
 @media (max-width: 740px) {
   .potential-layout { grid-template-columns: minmax(0, 1fr); }
-  .potential-grade-path { margin-bottom: 25px; }
-  .potential-grade-steps { gap: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { .potential-page * { transition: none !important; } }

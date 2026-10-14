@@ -286,13 +286,6 @@ export default function App() {
     return () => { clearTimeout(timer); request.current += 1; worker.current?.terminate(); worker.current = null; };
   }, [cfgInput, recalculate]);
 
-  const gradeChip = (label, color, sub) => (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-      <span style={{ color, fontWeight: 700, fontSize: 14 }}>{label}</span>
-      <span style={{ color: C.sub, fontSize: 11, whiteSpace: "nowrap" }}>{sub}</span>
-    </div>
-  );
-
   const eng = result && !result.error ? result.eng : null;
   const judgedMap = {};
   if (eng) {
@@ -329,18 +322,6 @@ export default function App() {
       <CalculatorHeader eyebrow="POTENTIAL TRADE" scope="일반 잠재능력"
         title={<>잠재능력 <em>장사 계산기</em></>}
         description={<>매입가와 판매 시세로 재설정 장사의 기대 수익을 계산합니다.<br />등급업 천장 이월과 판매·홀드 최적 정책을 비교하세요.</>} />
-      <CalculatorCard as="div" className="potential-grade-path">
-          <div className="potential-grade-steps">
-            {gradeChip("에픽", C.epic, `${fmtMeso(+costs.epic)}/회`)}
-            <span style={{ color: C.sub, fontSize: 12 }}>{miracle ? "7%" : "3.5%"} · 천장42 →</span>
-            {gradeChip("유니크", C.unique, `${fmtMeso(+costs.unique)}/회`)}
-            <span style={{ color: C.sub, fontSize: 12 }}>{miracle ? "2.8%" : "1.4%"} · 천장107 →</span>
-            {gradeChip("레전드리", C.legend, `${fmtMeso(+costs.legend)}/회`)}
-            {primeOn && <><span style={{ color: C.sub, fontSize: 12 }}>1줄 고정 →</span>
-              {gradeChip("프라임", C.prime, `${fmtMeso((parseFloat(primeCostEok) || 0) * 1e8)}/회`)}</>}
-          </div>
-        </CalculatorCard>
-
         <div className="calculator-layout potential-layout">
           {/* 좌측: 설정 */}
           <aside className="calculator-settings potential-settings" aria-label="잠재능력 장사 설정">
