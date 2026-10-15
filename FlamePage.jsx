@@ -216,7 +216,7 @@ export default function FlamePage() {
           <div className="flame-empty-steps"><span>스텟 효율</span><i>＋</i><span>재설정 비용</span><i>＋</i><span>상승분의 가치</span></div>
         </CalculatorCard>}
         {result && <>
-          <div className={`flame-card flame-recommendation ${result.shouldReset ? 'flame-reset' : 'flame-keep'}`}>
+          <CalculatorCard as="div" className={`flame-card flame-recommendation ${result.shouldReset ? 'flame-reset' : 'flame-keep'}`}>
             <div className="flame-section-title"><span className="flame-pill">추천 종료 기준</span><span>{showGrade ? '주스텟 환산 급수' : '주스텟 % 환산'}</span></div>
             {result.targetScore === null
               ? <div className="flame-no-budget">추가 지출 없이<br /><strong>현재 옵션을 유지하세요</strong></div>
@@ -229,7 +229,7 @@ export default function FlamePage() {
                 ? '주스텟 상승분에 비용을 배정하지 않았으므로, 유료 재설정을 진행하지 않습니다.'
                 : '추가 상승분의 기대 가치가 재설정 비용을 넘지 않습니다. 입력한 스텟 가치에서는 여기서 멈추는 것이 유리합니다.'}</p></div></div>
             {result.targetScore !== null && <ScoreComparison current={result.currentScore} target={result.targetScore} formatScore={formatScore} />}
-          </div>
+          </CalculatorCard>
           <CalculatorCard as="section" className="flame-card">
             <div className="flame-section-title"><h2>여기서부터 예상되는 결과</h2><span>평균값 · 보장 수치 아님</span></div>
             <div className="flame-estimate-grid">

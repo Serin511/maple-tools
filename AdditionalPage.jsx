@@ -280,7 +280,7 @@ export default function AdditionalPage() {
           </CalculatorCard>
 
           {selected?.available && <>
-            <div className={`flame-card flame-recommendation ${isStop ? 'flame-keep' : ''}`}>
+            <CalculatorCard as="div" className={`flame-card flame-recommendation ${isStop ? 'flame-keep' : ''}`}>
               <div className="flame-section-title"><span className="flame-pill">{selected.id === result.recommendedId ? '추천 전략' : '선택한 전략'}</span><span>{selected.label}</span></div>
               {isStop ? <div className="flame-no-budget">입력한 주스탯 가치에서는<br /><strong>현재 옵션을 유지하세요</strong></div>
                 : currentThreshold?.firstLineDependent ? <div className="flame-no-budget"><strong>첫 줄과 환산값으로 판단</strong><p>첫 줄 조건에 따라 종료 기준이 달라집니다.</p></div>
@@ -294,7 +294,7 @@ export default function AdditionalPage() {
                   <td>{score(range.minScore)}{range.maxScore !== range.minScore ? ` ~ ${score(range.maxScore)}` : ''}</td><td>{actionLabel(range.action)}</td>
                 </tr>)}</tbody></table></div><p className="flame-small-note">이 구간은 실제로 나올 수 있는 옵션 점수를 묶은 것입니다. {currentThreshold.firstLineDependent && '첫 줄 조건이 다르면 같은 환산값에서도 행동이 달라집니다. '}누적 실패 스택이 바뀌면 행동 기준도 바뀔 수 있습니다.</p>
               </details>}
-            </div>
+            </CalculatorCard>
             <CalculatorCard as="section" className="flame-card"><div className="flame-section-title"><h2>여기서부터 예상되는 결과</h2><span>평균값 · 보장 수치 아님</span></div>
               <Estimate strategy={selected} />
               <AttemptSplit strategy={selected} primeOn={settings.prime.on} />
