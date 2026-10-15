@@ -4,6 +4,7 @@ import AbilityPage from './AbilityPage.jsx';
 import FlamePage from './FlamePage.jsx';
 import AdditionalPage from './AdditionalPage.jsx';
 import AdditionalTradePage from './AdditionalTradePage.jsx';
+import { trackPageView } from './analytics.mjs';
 import './ui.css';
 
 // Add future calculators here to share navigation, titles and page state retention.
@@ -27,6 +28,7 @@ export default function Shell() {
   }, []);
   useEffect(() => {
     document.title = `${calculators.find(({ id }) => id === page).title} | 메이플 계산기`;
+    trackPageView(page);
   }, [page]);
   return <>
     <nav aria-label="계산기 페이지" className="maple-nav">
