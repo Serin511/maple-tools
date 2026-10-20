@@ -5,6 +5,7 @@ const worker = JSON.stringify(readFileSync("ability-worker.js", "utf8")).replace
 const flameWorker = JSON.stringify(readFileSync("flame-worker.js", "utf8")).replace(/</g, "\\u003c");
 const additionalWorker = JSON.stringify(readFileSync("additional-worker.js", "utf8")).replace(/</g, "\\u003c");
 const additionalTradeWorker = JSON.stringify(readFileSync("additional-trade-worker.js", "utf8")).replace(/</g, "\\u003c");
+const flameTradeWorker = JSON.stringify(readFileSync("flame-trade-worker.js", "utf8")).replace(/</g, "\\u003c");
 const potentialWorker = JSON.stringify(readFileSync("potential-worker.js", "utf8")).replace(/</g, "\\u003c");
 const html = `<!DOCTYPE html>
 <html lang="ko">
@@ -12,7 +13,7 @@ const html = `<!DOCTYPE html>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>메이플 계산기 · 잠재능력·어빌리티·추가옵션·에디셔널</title>
-<meta name="description" content="메이플스토리 잠재능력 장사 수익, 어빌리티 최적 전략, 추가옵션·에디셔널 효율 계산기로 재설정 중단점 계산 · 공식 확률표 기반" />
+<meta name="description" content="메이플스토리 잠재능력·추가옵션 장사 수익, 어빌리티 최적 전략, 추가옵션·에디셔널 효율 계산기로 재설정 중단점 계산 · 공식 확률표 기반" />
 <style>html,body{margin:0;padding:0;background:#12151b}#root{min-height:100vh}${css}</style>
 </head>
 <body>
@@ -21,6 +22,7 @@ const html = `<!DOCTYPE html>
 <script id="flame-worker-source" type="application/json">${flameWorker}</script>
 <script id="additional-worker-source" type="application/json">${additionalWorker}</script>
 <script id="additional-trade-worker-source" type="application/json">${additionalTradeWorker}</script>
+<script id="flame-trade-worker-source" type="application/json">${flameTradeWorker}</script>
 <script id="potential-worker-source" type="application/json">${potentialWorker}</script>
 <script>${js.replace(/<\/script/gi, "<\\/script")}</script>
 </body>

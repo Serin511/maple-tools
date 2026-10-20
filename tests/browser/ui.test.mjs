@@ -13,6 +13,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const routes = [
   { path: 'potential', heading: /잠재능력.*장사/, title: '잠재능력 장사 | 메이플 계산기' },
   { path: 'additional-trade', heading: /에디셔널.*잠재능력 장사/, title: '에디셔널 잠재능력 장사 | 메이플 계산기' },
+  { path: 'flame-trade', heading: /추가옵션.*장사 계산기/, title: '추가옵션 장사 | 메이플 계산기' },
   { path: 'ability', heading: /어빌리티.*최적 전략/, title: '어빌리티 최적 전략 | 메이플 계산기' },
   { path: 'flame', heading: /추가옵션.*효율 계산기/, title: '추가옵션 효율 계산기 | 메이플 계산기' },
   { path: 'additional', heading: /에디셔널.*전략 계산기/, title: '에디셔널 전략 | 메이플 계산기' },
@@ -362,6 +363,8 @@ test('all calculator routes fit a 375px phone, including populated results', { t
     }
     await configureGuaranteedTrade(page);
     await assertNoOverflow(page, 'additional-trade result');
+    await configureFlameTrade(page);
+    await assertNoOverflow(page, 'flame-trade result');
     await open(page, 'potential');
     await page.getByLabel('유니크 STR 12% 판매가 (억 메소)', { exact: true }).fill('10');
     await page.getByText('라운드당 기대 순익 (장기)', { exact: true }).waitFor({ timeout: 60_000 });
@@ -474,6 +477,11 @@ const tradeEquipment = [
     grade: '재설정 시작 등급', stacks: ['에픽 현재 등급업 실패 스택', '유니크 현재 등급업 실패 스택'],
     floor: '레전드리 잡옵 처분가 (억 메소)',
   },
+  {
+    path: 'flame-trade', storageKey: 'maple:flame-trade:settings:v1',
+    purchase: '노작 매입가 (억 메소)', level: '아이템 레벨 제한', stacks: [],
+    floor: '잡추옵 처분가 (억 메소)',
+  },
 ];
 
 test('trading equipment panels share the potential workflow and full-width controls on desktop and phone', async () => {
@@ -484,7 +492,7 @@ test('trading equipment panels share the potential workflow and full-width contr
         const panel = page.locator('main:visible .calculator-trade-equipment');
         assert.equal(await panel.count(), 1);
         assert.equal(await panel.getByRole('heading', { level: 2, name: '장비 설정', exact: true }).count(), 1);
-        const expectedOrder = [fields.purchase, fields.level, fields.part, ...(fields.grade ? [fields.grade] : []),
+        const expectedOrder = [fields.purchase, fields.level, ...(fields.part ? [fields.part] : []), ...(fields.grade ? [fields.grade] : []),
           ...fields.stacks, '경매장 수수료 (%)', fields.floor];
         const controls = panel.locator('input[type="number"], select');
         assert.deepEqual(await controls.evaluateAll(inputs => inputs.map(input => input.getAttribute('aria-label'))), expectedOrder);
@@ -520,7 +528,8 @@ test('trading equipment panels share the potential workflow and full-width contr
 });
 
 test('shared trading equipment inputs keep each calculator\'s units, blanks and saved settings', async () => {
-  for (const fields of tradeEquipment) {
+  // The flame trade has no part or pity inputs; its own test covers its settings.
+  for (const fields of tradeEquipment.filter(candidate => candidate.part)) {
     await withPage(async page => {
       await open(page, fields.path);
       const panel = page.locator('main:visible .calculator-trade-equipment');
@@ -763,6 +772,76 @@ async function configureGuaranteedTrade(page) {
   await waitForText(page.getByRole('status'), /계산 완료/);
 }
 
+async function configureFlameTrade(page) {
+  await open(page, 'flame-trade');
+  const main = page.locator('main:visible');
+  const add = main.getByRole('button', { name: '＋ 판매가 조건 추가', exact: true });
+  await main.getByLabel('노작 매입가 (억 메소)', { exact: true }).fill('2.5');
+  await add.click();
+  await main.getByLabel('1번 판매가 조건의 추가옵션 환산 급수', { exact: true }).fill('140');
+  await main.getByLabel('1번 판매가 조건의 판매가 (억 메소)', { exact: true }).fill('2');
+  await add.click();
+  await main.getByLabel('2번 판매가 조건의 입력 방식', { exact: true }).selectOption('stats');
+  await main.getByLabel('2번 판매가 조건의 주스탯', { exact: true }).fill('120');
+  await main.getByLabel('2번 판매가 조건의 올스탯%', { exact: true }).fill('4');
+  await main.getByLabel('2번 판매가 조건의 판매가 (억 메소)', { exact: true }).fill('12');
+  await waitForText(page.getByRole('status'), /계산 완료/);
+}
+
+test('flame trade prices total and stat rows, holds sales below the purchase price and restores presets', { timeout: 120_000 }, async () => {
+  await withPage(async page => {
+    await open(page, 'flame-trade');
+    const main = page.locator('main:visible');
+    assert.match(await main.getByRole('status').innerText(), /판매가를 입력하면/);
+    assert.equal(await main.getByRole('button', { name: /장사 기대 수익 계산/ }).isDisabled(), true);
+    await configureFlameTrade(page);
+    // Default conversion: 120 + 4% all-stat * 11 = 164 grades.
+    assert.match(await main.locator('.ft-row-grade').innerText(), /164급/);
+    const results = page.getByRole('region', { name: '추가옵션 장사 판매가와 계산 결과' });
+    assert.equal(await results.locator('.flame-threshold strong').innerText(), '164급');
+    const decisions = await results.locator('.ft-decisions tbody tr').evaluateAll(rows => rows.map(row => [row.cells[0].innerText, row.cells[2].innerText]));
+    assert.deepEqual(decisions.map(([, decision]) => decision), ['판매', '계속 재설정', '계속 재설정'],
+      'A 2억 result nets less than the 2.5억 purchase price, so it is better to keep resetting.');
+    assert.match(decisions[1][0], /140급 이상/);
+    assert.equal(await results.locator('.ft-summary-metric b').first().getAttribute('class'), 'ft-positive');
+    assert.match(await results.innerText(), /가격 조건에 도달하는 즉시 판매할 때/);
+    await page.waitForFunction(key => {
+      const saved = JSON.parse(localStorage.getItem(key));
+      return saved?.itemPrice === 250000000 && saved.prices.length === 2 && saved.prices[1].mode === 'stats' && saved.prices[1].price === 1200000000;
+    }, 'maple:flame-trade:settings:v1');
+
+    // An input error replaces the stale result until the input is valid again.
+    const fee = main.getByLabel('경매장 수수료 (%)', { exact: true });
+    await fee.fill('');
+    await waitForText(main.getByRole('alert'), /수수료/);
+    assert.equal(await results.locator('.ft-summary').count(), 0);
+    await fee.fill('3');
+    await waitForText(page.getByRole('status'), /계산 완료/);
+
+    // Selling to one main stat lowers the chance of reaching each grade.
+    const chanceBefore = await results.locator('.flame-equivalent b').first().innerText();
+    for (const stat of ['DEX', 'INT', 'LUK']) await main.getByRole('button', { name: stat, exact: true }).click();
+    assert.equal(await main.getByRole('button', { name: 'STR', exact: true }).getAttribute('aria-pressed'), 'true');
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    assert.notEqual(await results.locator('.flame-equivalent b').first().innerText(), chanceBefore);
+    assert.match(await results.locator('.ft-recommendation').innerText(), /STR 환산 급수 기준/);
+
+    await main.getByLabel('저장할 프리셋 이름', { exact: true }).fill('STR 추옵');
+    await main.getByLabel('저장할 프리셋 이름', { exact: true }).press('Enter');
+    await main.getByRole('button', { name: '2번 판매가 조건 삭제', exact: true }).click();
+    await main.getByLabel('노작 매입가 (억 메소)', { exact: true }).fill('1');
+    const presets = main.getByLabel('저장된 프리셋', { exact: true });
+    await presets.selectOption('');
+    await presets.selectOption('STR 추옵');
+    assert.equal(await main.getByLabel('노작 매입가 (억 메소)', { exact: true }).inputValue(), '2.5');
+    assert.equal(await main.getByLabel('2번 판매가 조건의 입력 방식', { exact: true }).inputValue(), 'stats');
+    await page.reload();
+    await main.waitFor();
+    assert.equal(await main.getByLabel('2번 판매가 조건의 주스탯', { exact: true }).inputValue(), '120');
+    assert.equal(await main.getByRole('button', { name: 'LUK', exact: true }).getAttribute('aria-pressed'), 'false');
+    await waitForText(page.getByRole('status'), /계산 완료/);
+  });
+});
 test('additional trade subtracts reset cost and auction fee for a guaranteed sale', { timeout: 120_000 }, async () => {
   await withPage(async page => {
     await configureGuaranteedTrade(page);

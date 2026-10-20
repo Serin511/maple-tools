@@ -4,6 +4,7 @@ import AbilityPage from './AbilityPage.jsx';
 import FlamePage from './FlamePage.jsx';
 import AdditionalPage from './AdditionalPage.jsx';
 import AdditionalTradePage from './AdditionalTradePage.jsx';
+import FlameTradePage from './FlameTradePage.jsx';
 import { trackPageView } from './analytics.mjs';
 import './ui.css';
 
@@ -11,6 +12,7 @@ import './ui.css';
 const calculators = [
   { id: 'potential', label: '잠재능력 장사', title: '잠재능력 장사', Page: App },
   { id: 'additional-trade', label: '에디셔널 잠재 장사', title: '에디셔널 잠재능력 장사', Page: AdditionalTradePage },
+  { id: 'flame-trade', label: '추가옵션 장사', title: '추가옵션 장사', Page: FlameTradePage },
   { id: 'ability', label: '어빌리티 전략', title: '어빌리티 최적 전략', Page: AbilityPage },
   { id: 'flame', label: '추가옵션 효율 계산기', title: '추가옵션 효율 계산기', Page: FlamePage },
   { id: 'additional', label: '에디셔널 전략', title: '에디셔널 전략', Page: AdditionalPage },
