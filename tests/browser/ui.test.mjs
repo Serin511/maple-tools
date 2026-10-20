@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { solveEngine, campaignStats } from '../../potential-engine.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const routes = [
@@ -789,6 +790,62 @@ test('additional trade subtracts reset cost and auction fee for a guaranteed sal
   });
 });
 
+test('potential summary scales profit to 100 eok in every mode and fits desktop and phone', { timeout: 120_000 }, async () => {
+  const saved = {
+    level: 200, part: 'heart', itemPriceEok: '3', fee: '3', pity: '0', floorEok: '1.5',
+    autoExclude: false, costs: { epic: 2e6, unique: 2e6, legend: 2e6 },
+    statPrices: { 'u:STR_12': '20' },
+  };
+  const cfg = {
+    part: 'heart', level: 200, itemPrice: 3e8, fee: 3, floorPrice: 1.5e8,
+    autoExclude: false, miracle: false, costs: saved.costs, prime: { on: false },
+    targetsU: [{ id: 'STR_12', kind: 'stat', stat: 'STR', min: 12, price: 20e8 }], targetsL: [],
+  };
+  const eng = solveEngine(cfg);
+  await withPage(async page => {
+    await open(page, 'potential');
+    const cards = page.locator('main:visible .potential-summary-metric');
+    const value = cards.filter({ hasText: '100억당 기대 순익' }).locator('.potential-summary-value');
+    const assertValue = async (stats, rounds = 1) => {
+      // Equal per-reset costs give an independent spending formula.
+      const eok = 100 * stats.profit / (rounds * cfg.itemPrice + stats.resets * 2e6);
+      const expected = (eok >= 0 ? '+' : '-') + Math.abs(eok).toLocaleString('ko-KR', { maximumFractionDigits: 2 }) + '억';
+      await value.filter({ hasText: expected }).waitFor({ timeout: 60_000 });
+      assert.equal(await value.innerText(), expected);
+    };
+    await assertValue(eng.steady);
+    assert.equal(await cards.count(), 5);
+    const desktop = await cards.evaluateAll(nodes => nodes.map(node => {
+      const { y, width } = node.getBoundingClientRect(); return { y, width };
+    }));
+    for (const card of desktop) {
+      assert.ok(Math.abs(card.y - desktop[0].y) < 1, 'Five desktop cards share one row.');
+      assert.ok(Math.abs(card.width - desktop[0].width) < 1, 'Desktop cards have equal widths.');
+    }
+    await page.getByLabel('현재 유→레 천장 스택 (0~107)', { exact: true }).fill('50');
+    await assertValue(eng.round(50));
+    await page.getByRole('button', { name: '천장 소모까지 반복', exact: true }).click();
+    const camp = campaignStats(eng, 50, cfg.itemPrice);
+    await assertValue(camp, camp.rounds);
+    await page.setViewportSize({ width: 375, height: 900 });
+    await assertNoOverflow(page, 'Potential summary with five cards');
+    const mobile = await cards.evaluateAll(nodes => nodes.map(node => {
+      const { x, width } = node.getBoundingClientRect(); return { x, width };
+    }));
+    assert.ok(mobile[4].width > mobile[0].width * 1.9, 'The last mobile card spans both columns.');
+    await page.getByLabel('노작 매입가 (억 메소)', { exact: true }).fill('99');
+    await waitForText(value, /-/);
+    await page.getByLabel('노작 매입가 (억 메소)', { exact: true }).fill('0');
+    for (const grade of ['에픽', '유니크', '레전드리']) {
+      await page.getByLabel(`${grade} 재설정 비용 (메소)`, { exact: true }).fill('0');
+    }
+    await waitForText(value, /—/);
+  }, {
+    data: saved,
+    init: settings => localStorage.setItem('mpc:auto:v1', JSON.stringify(settings)),
+  });
+});
+
 test('potential prices calculate a result and persist through navigation and reload', { timeout: 120_000 }, async () => {
   await withPage(async page => {
     await open(page, 'potential');
@@ -855,7 +912,7 @@ test('potential always includes all-stat lines after restoring old settings and 
       const detail = page.getByRole('button', { name: 'STR 12%', exact: true });
       await detail.click();
       const panelId = await detail.getAttribute('aria-controls');
-      assert.match(await page.locator(`[id="${panelId}"]`).innerText(), /STR\+6% · 올스탯\+6%/,
+      assert.match(await page.locator(`[id="${panelId}"]`).innerText(), /(?:STR\+6% · 올스탯\+6%|올스탯\+6% · STR\+6%)/,
         'A stat target must include combinations that reach its threshold through all-stat lines.');
       await detail.click();
 

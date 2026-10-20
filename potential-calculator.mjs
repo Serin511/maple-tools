@@ -27,6 +27,19 @@ export function preparePotentialConfig(input) {
 
 const transferableEngine = ({ round, roundDist, ...engine }) => engine;
 
+// Use the same period for profit, reset spending and item purchases.
+export function potentialDisplayStats(result) {
+  if (!result?.eng || result.error) return null;
+  const campaign = result.singleRound && result.pityMode === 'campaign' && result.camp;
+  const stats = campaign || (result.singleRound ? result.first : result.eng.steady);
+  const outlay = stats.cost + result.cfg.itemPrice * (campaign ? campaign.rounds : 1);
+  return {
+    profit: stats.profit, resets: stats.resets,
+    breakeven: campaign ? campaign.breakeven : result.singleRound ? stats.rev - stats.cost : result.eng.breakeven,
+    profitPer100Eok: outlay > 0 ? stats.profit / outlay * 100e8 : null,
+  };
+}
+
 export function calculatePotentialStrategy(input, { simulation = {} } = {}) {
   const requestedCfg = preparePotentialConfig(input);
   const eng = solveEngine(requestedCfg);

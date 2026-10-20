@@ -734,18 +734,18 @@ export function campaignStats(eng, j0, itemPrice) {
   if (eng.uSt.q >= 1 - 1e-14)
     throw new RangeError("유니크에서 항상 판매하면 천장 소모 캠페인은 종료되지 않습니다.");
   const N = PITY.unique + 1;
-  const P = new Float64Array(N), R = new Float64Array(N), Ro = new Float64Array(N);
+  const P = new Float64Array(N), C = new Float64Array(N), R = new Float64Array(N), Ro = new Float64Array(N);
   for (let j = N - 1; j >= 0; j--) {
     const d = eng.roundDist(j), r = eng.round(j);
-    let p = r.profit, re = r.resets, ro = 1;
+    let p = r.profit, c = r.cost, re = r.resets, ro = 1;
     for (let k = j + 1; k < N; k++) {
       if (d[k] < 1e-15) continue;
-      p += d[k] * P[k]; re += d[k] * R[k]; ro += d[k] * Ro[k];
+      p += d[k] * P[k]; c += d[k] * C[k]; re += d[k] * R[k]; ro += d[k] * Ro[k];
     }
     // j=0에서 d[0]은 승급 종료도 포함하므로 자기 전이는 최초 유니크 판매 확률만 사용한다.
     const denom = 1 - eng.uSt.q;
-    P[j] = p / denom; R[j] = re / denom; Ro[j] = ro / denom;
+    P[j] = p / denom; C[j] = c / denom; R[j] = re / denom; Ro[j] = ro / denom;
   }
   const rounds = Math.max(Ro[j0], 1e-9);
-  return { profit: P[j0], resets: R[j0], rounds, breakeven: (P[j0] + rounds * itemPrice) / rounds };
+  return { profit: P[j0], cost: C[j0], resets: R[j0], rounds, breakeven: (P[j0] + rounds * itemPrice) / rounds };
 }
