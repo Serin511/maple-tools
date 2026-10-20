@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { preparePotentialConfig, calculatePotentialStrategy } from '../potential-calculator.mjs';
+import { preparePotentialConfig, calculatePotentialStrategy, potentialDisplayStats } from '../potential-calculator.mjs';
 import { solveEngine, campaignStats } from '../potential-engine.mjs';
 
 const close = (a, b, tolerance = 1e-10) => assert.ok(Math.abs(a - b) <= tolerance * Math.max(1, Math.abs(b)), `${a} != ${b}`);
@@ -10,6 +10,48 @@ const settings = (patch = {}) => ({
   costs: { epic: '2', unique: '3', legend: '5' },
   itemPriceEok: '0.00000007', floorEok: '0.000001', pity: '50', pityMode: 'single',
   primeOn: false, primeCostEok: '', primeFixed: 'STR', priceInputs: ['0.000005', ''], ...patch,
+});
+
+test('100-eok profit includes purchases and reset spending for the selected period', () => {
+  const result = {
+    cfg: { itemPrice: 5e8 }, singleRound: false,
+    eng: { steady: { profit: 4e8, cost: 15e8, resets: 30 }, breakeven: 9e8 },
+    first: { profit: -2e8, cost: 5e8, resets: 10, rev: 8e8 },
+    camp: { profit: 12e8, cost: 45e8, rounds: 3, resets: 90, breakeven: 9e8 },
+  };
+  // 5억 purchase + 15억 resets => 4억 profit per 20억 spent.
+  assert.equal(potentialDisplayStats(result).profitPer100Eok, 20e8);
+  result.singleRound = true;
+  result.pityMode = 'single';
+  assert.equal(potentialDisplayStats(result).profitPer100Eok, -20e8);
+  result.pityMode = 'campaign';
+  // Three purchases must be counted: 15억 + 45억 => 12억 per 60억.
+  assert.equal(potentialDisplayStats(result).profitPer100Eok, 20e8);
+  result.camp = null;
+  assert.equal(potentialDisplayStats(result).profitPer100Eok, -20e8);
+  result.first.cost = 0;
+  result.cfg.itemPrice = 0;
+  assert.equal(potentialDisplayStats(result).profitPer100Eok, null);
+  assert.equal(potentialDisplayStats(null), null);
+});
+
+test('campaign reset costs include repeat purchases separately and all reset types', () => {
+  // Every reset costs 2 meso, including Prime, so cost = resets × 2
+  // regardless of how often Unique sales restart the item cycle.
+  for (const primeOn of [false, true]) {
+    const result = calculatePotentialStrategy(settings({
+      pityMode: 'campaign', costs: { epic: 2, unique: 2, legend: 2 },
+      targetsL: [{ id: 'str36', kind: 'stat', stat: 'STR', min: 36, price: 1e6 }],
+      primeOn, primeCostEok: '0.00000002',
+    }));
+    assert.ok(result.camp.rounds > 1);
+    if (primeOn) assert.equal(result.eng.legMode, 'P');
+    close(result.camp.cost, result.camp.resets * 2);
+    const metrics = potentialDisplayStats(result);
+    close(metrics.profitPer100Eok, 100e8 * result.camp.profit /
+      (2 * result.camp.resets + 7 * result.camp.rounds));
+    assert.deepEqual(structuredClone(result), result);
+  }
 });
 
 test('editable money fields convert from eok once; reset costs and target prices retain meso units', () => {

@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { COST_DEFAULT, PART_LABELS, STATS, primeAtomList, atomLabel } from "./potential-engine.mjs";
 import { normalizePotentialSettings, normalizePotentialPresets, migratePotentialPrices as migratePrices } from "./potential-settings.mjs";
-import { preparePotentialConfig } from "./potential-calculator.mjs";
+import { preparePotentialConfig, potentialDisplayStats } from "./potential-calculator.mjs";
 import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, PresetControls, TradeEquipmentSettings, TradeResetCostSettings, ToggleField, PrimeCubeSettings } from "./ui.jsx";
 import { TradePriceEditor } from "./TradePriceEditor.jsx";
 import "./potential.css";
@@ -300,13 +300,7 @@ export default function App() {
   }
   const sr = eng ? !!result.singleRound : false;
   const pm = sr ? result.pityMode : null;
-  const disp = eng
-    ? (sr && pm === "campaign" && result.camp
-      ? { profit: result.camp.profit, resets: result.camp.resets, breakeven: result.camp.breakeven }
-      : sr
-        ? { profit: result.first.profit, resets: result.first.resets, breakeven: result.first.rev - result.first.cost }
-        : { profit: eng.steady.profit, resets: eng.steady.resets, breakeven: eng.breakeven })
-    : null;
+  const disp = potentialDisplayStats(result);
   const compTotal = result && result.mc ? (result.mc.compRounds || result.mc.rounds) : 0;
   const compEntries = result && result.mc
     ? Object.entries(result.mc.tidCount).sort((a, b) => b[1] - a[1]).map(([tid, n]) => {
@@ -536,22 +530,24 @@ export default function App() {
                     ))}
                   </div>
                 )}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+                <div className="potential-summary-grid">
                   {[
                     ["재설정 1회당 기대 이득", disp.profit / disp.resets, true],
                     [sr ? (pm === "campaign" ? "천장 소모까지 기대 순익" : `이번 라운드 기대 순익 (천장 ${result.j0} 반영)`) : "라운드당 기대 순익 (장기)", disp.profit, true],
                     [sr ? (pm === "campaign" ? "천장 소모까지 기대 재설정" : "이번 라운드 기대 재설정") : "라운드당 기대 재설정", disp.resets, false],
                     ["손익분기 노작 매입가", disp.breakeven, null],
+                    ["100억당 기대 순익", disp.profitPer100Eok, true],
                   ].map(([lb, v, money]) => (
-                    <div key={lb} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 14px" }}>
-                      <div style={{ fontSize: 11, color: C.sub, marginBottom: 4 }}>{lb}</div>
-                      <div style={{ fontSize: 19, fontWeight: 800, color: money === true ? (v >= 0 ? C.ok : C.danger) : C.text }}>
-                        {money === false ? v.toLocaleString("ko-KR", { maximumFractionDigits: 1 }) + "회"
+                    <div key={lb} className="potential-summary-metric">
+                      <div className="potential-summary-label">{lb}</div>
+                      <div className="potential-summary-value" style={{ color: money === true && v !== null ? (v >= 0 ? C.ok : C.danger) : C.text }}>
+                        {v === null ? "—" : money === false ? v.toLocaleString("ko-KR", { maximumFractionDigits: 1 }) + "회"
                           : (money === true && v >= 0 ? "+" : "") + fmtMeso(v)}
                       </div>
                     </div>
                   ))}
                 </div>
+                <p className="potential-summary-explanation">100억당 기대 순익 = 기대 순익 ÷ (노작 매입비 + 기대 재설정 비용) × 100억. 선택한 계산 범위의 전체 매입비와 일반·프라임 재설정 비용을 반영하며, 투입금이 0이면 —로 표시합니다.</p>
                 {sr ? (
                   <CalculatorCard as="div" style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 12, color: C.sub }}>
                     {pm === "campaign" ? (
