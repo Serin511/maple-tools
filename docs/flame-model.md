@@ -41,6 +41,6 @@ v * E[max(X - t, 0)] = c
 
 ## 구현과 검증
 
-새 설정은 별도 localStorage 키에 보관한다. 설정 변경 시 이전 결과를 숨기며 재계산은 이전 Worker를 종료한다. Worker와 CSS는 기존 어빌리티와 동일하게 단일 `dist/index.html`에 포함하므로 GitHub Pages 해시 경로와 파일 직접 열기에서 동작한다.
+옵션 열거(`forEachFlameOutcome`)는 각 옵션이 실제로 올리는 스탯(`stats`)으로도 사용할 수 있어 [추가옵션 장사](flame-trade-model.md)가 같은 확률 모델을 공유한다. 새 설정은 별도 localStorage 키에 보관한다. 설정 변경 시 이전 결과를 숨기며 재계산은 이전 Worker를 종료한다. Worker와 CSS는 기존 어빌리티와 동일하게 단일 `dist/index.html`에 포함하므로 GitHub Pages 해시 경로와 파일 직접 열기에서 동작한다.
 
 `npm test`는 효율 환산, 확률 질량과 옵션 중복, 레벨 경계, 독립적으로 계산한 평균 스텟, 단순 분포의 닫힌 식, 모든 채택 부분집합과 Bellman 방정식 비교, 0 지불 의향, 희박한 결과와 입력 오류를 확인한다. `npm run build`로 배포용 HTML을 생성한다.

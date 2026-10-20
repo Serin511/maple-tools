@@ -44,27 +44,29 @@ export const FLAME_TIER_PROBABILITIES = Object.freeze([
 // Renaming STR/DEX to any distinct main/sub pair leaves the distribution
 // unchanged. The selected attack/magic option uses `attack`; the other is
 // ignored. The two unrelated stats still occupy their actual option slots.
+// `stats` names the actual totals each option raises, for calculators that
+// compare several main stats at once.
 export const FLAME_ARMOR_OPTION_TYPES = Object.freeze([
-  { id: 'str', label: 'STR', kind: 'single', keys: ['main'] },
-  { id: 'dex', label: 'DEX', kind: 'single', keys: ['sub'] },
-  { id: 'int', label: 'INT', kind: 'single', keys: [] },
-  { id: 'luk', label: 'LUK', kind: 'single', keys: [] },
-  { id: 'strDex', label: 'STR+DEX', kind: 'dual', keys: ['main', 'sub'] },
-  { id: 'strInt', label: 'STR+INT', kind: 'dual', keys: ['main'] },
-  { id: 'strLuk', label: 'STR+LUK', kind: 'dual', keys: ['main'] },
-  { id: 'dexInt', label: 'DEX+INT', kind: 'dual', keys: ['sub'] },
-  { id: 'dexLuk', label: 'DEX+LUK', kind: 'dual', keys: ['sub'] },
-  { id: 'intLuk', label: 'INT+LUK', kind: 'dual', keys: [] },
-  { id: 'hp', label: '최대 HP', kind: 'ignored', keys: [] },
-  { id: 'mp', label: '최대 MP', kind: 'ignored', keys: [] },
-  { id: 'levelReduction', label: '착용 레벨 감소', kind: 'ignored', keys: [] },
-  { id: 'defense', label: '방어력', kind: 'ignored', keys: [] },
-  { id: 'attack', label: '공격력', kind: 'tier', keys: ['attack'], minLevel: 60 },
-  { id: 'magic', label: '마력', kind: 'ignored', keys: [], minLevel: 60 },
-  { id: 'speed', label: '이동속도', kind: 'ignored', keys: [] },
-  { id: 'jump', label: '점프력', kind: 'ignored', keys: [] },
-  { id: 'all', label: '올스탯%', kind: 'tier', keys: ['all'], minLevel: 70 },
-].map(option => Object.freeze({ ...option, keys: Object.freeze(option.keys) })));
+  { id: 'str', label: 'STR', kind: 'single', keys: ['main'], stats: ['STR'] },
+  { id: 'dex', label: 'DEX', kind: 'single', keys: ['sub'], stats: ['DEX'] },
+  { id: 'int', label: 'INT', kind: 'single', keys: [], stats: ['INT'] },
+  { id: 'luk', label: 'LUK', kind: 'single', keys: [], stats: ['LUK'] },
+  { id: 'strDex', label: 'STR+DEX', kind: 'dual', keys: ['main', 'sub'], stats: ['STR', 'DEX'] },
+  { id: 'strInt', label: 'STR+INT', kind: 'dual', keys: ['main'], stats: ['STR', 'INT'] },
+  { id: 'strLuk', label: 'STR+LUK', kind: 'dual', keys: ['main'], stats: ['STR', 'LUK'] },
+  { id: 'dexInt', label: 'DEX+INT', kind: 'dual', keys: ['sub'], stats: ['DEX', 'INT'] },
+  { id: 'dexLuk', label: 'DEX+LUK', kind: 'dual', keys: ['sub'], stats: ['DEX', 'LUK'] },
+  { id: 'intLuk', label: 'INT+LUK', kind: 'dual', keys: [], stats: ['INT', 'LUK'] },
+  { id: 'hp', label: '최대 HP', kind: 'ignored', keys: [], stats: [] },
+  { id: 'mp', label: '최대 MP', kind: 'ignored', keys: [], stats: [] },
+  { id: 'levelReduction', label: '착용 레벨 감소', kind: 'ignored', keys: [], stats: [] },
+  { id: 'defense', label: '방어력', kind: 'ignored', keys: [], stats: [] },
+  { id: 'attack', label: '공격력', kind: 'tier', keys: ['attack'], stats: ['attack'], minLevel: 60 },
+  { id: 'magic', label: '마력', kind: 'tier', keys: [], stats: ['magic'], minLevel: 60 },
+  { id: 'speed', label: '이동속도', kind: 'ignored', keys: [], stats: [] },
+  { id: 'jump', label: '점프력', kind: 'ignored', keys: [], stats: [] },
+  { id: 'all', label: '올스탯%', kind: 'tier', keys: ['all'], stats: ['all'], minLevel: 70 },
+].map(option => Object.freeze({ ...option, keys: Object.freeze(option.keys), stats: Object.freeze(option.stats) })));
 
 export function resetCostForLevel(level) {
   return Number.isInteger(level) && level >= 1 && level <= 300 ? FLAME_RESET_COST : null;

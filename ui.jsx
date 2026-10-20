@@ -68,7 +68,8 @@ const TRADE_EQUIPMENT_LABELS = Object.freeze({
 
 /** Trading calculators share the equipment workflow; monetary values use meso. */
 export function TradeEquipmentSettings({ values, onChange, levelOptions, partOptions, startGradeOptions,
-  pityFields = [], labels = {}, purchaseLabel = TRADE_EQUIPMENT_LABELS.purchase, purchaseHelp, children, className = '' }) {
+  pityFields = [], labels = {}, purchaseLabel = TRADE_EQUIPMENT_LABELS.purchase, purchaseHelp,
+  floorLabel = TRADE_EQUIPMENT_LABELS.floorPrice, floorHelp, children, className = '' }) {
   const fieldLabel = key => labels[key] || TRADE_EQUIPMENT_LABELS[key];
   const selectValue = (key, options, event) => {
     const option = options.find(item => String(item.value) === event.target.value);
@@ -86,11 +87,11 @@ export function TradeEquipmentSettings({ values, onChange, levelOptions, partOpt
         {levelOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
     </label>
-    <label className="calculator-trade-field">{TRADE_EQUIPMENT_LABELS.part}
+    {partOptions && <label className="calculator-trade-field">{TRADE_EQUIPMENT_LABELS.part}
       <select aria-label={fieldLabel('part')} value={values.part} onChange={event => selectValue('part', partOptions, event)}>
         {partOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
-    </label>
+    </label>}
     {startGradeOptions && <label className="calculator-trade-field">{TRADE_EQUIPMENT_LABELS.startGrade}
       <select aria-label={fieldLabel('startGrade')} value={values.startGrade}
         onChange={event => selectValue('startGrade', startGradeOptions, event)}>
@@ -101,9 +102,10 @@ export function TradeEquipmentSettings({ values, onChange, levelOptions, partOpt
     <label className="calculator-trade-field">{TRADE_EQUIPMENT_LABELS.fee}
       <NumericField label={fieldLabel('fee')} value={values.fee} max={100} onChange={fee => onChange({ fee })} />
     </label>
-    <label className="calculator-trade-field">{TRADE_EQUIPMENT_LABELS.floorPrice}
-      <NumericField label={labels.floorPrice || labels.floor || TRADE_EQUIPMENT_LABELS.floorPrice} value={values.floorPrice}
+    <label className="calculator-trade-field">{floorLabel}
+      <NumericField label={labels.floorPrice || labels.floor || floorLabel} value={values.floorPrice}
         scale={1e-8} onChange={floorPrice => onChange({ floorPrice })} />
+      {floorHelp && <span className="calculator-trade-help">{floorHelp}</span>}
     </label>
     {children}
   </CalculatorCard>;

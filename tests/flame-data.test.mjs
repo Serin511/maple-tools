@@ -32,6 +32,14 @@ test('all nineteen distinct option identities and official low-level eligibility
   assert.ok(!flameOptionPoolForLevel(59).some(option => ['attack', 'magic', 'all'].includes(option.id)));
 });
 
+test('actual stat names agree with the canonical STR main stat and DEX substat keys', () => {
+  const canonical = { STR: 'main', DEX: 'sub', attack: 'attack', all: 'all' };
+  for (const option of FLAME_ARMOR_OPTION_TYPES) {
+    assert.deepEqual([...option.keys], option.stats.filter(stat => stat in canonical).map(stat => canonical[stat]), option.id);
+    assert.equal(option.stats.length === 0, option.kind === 'ignored', option.id);
+  }
+});
+
 test('stat formulas change at twenty- and forty-level boundaries', () => {
   assert.equal(flameOptionAmount('single', 199, 7), 70);
   assert.equal(flameOptionAmount('single', 200, 7), 77);

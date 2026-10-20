@@ -15,43 +15,32 @@ function combinations(n, k) {
 }
 
 /**
- * Exact base-draw distribution for boss armor/accessories. Four distinct
+ * Exact base draw over stat totals for boss armor/accessories. Four distinct
  * available types are selected uniformly; each selected type independently
- * receives a tier. Irrelevant types are integrated out combinatorially.
- *
- * The real game rejects the identical complete prior result. That conditional
- * rule needs the complete original option identities, tiers and ignored stats,
- * which are not among this calculator's inputs. We retain the unconditional
- * base draw. In particular, equal-score results remain in the distribution.
+ * receives a tier. `keysOf(option)` names the totals in `statKeys` that the
+ * option raises. Types without keys are integrated out combinatorially.
+ * `visit(stats, p)` receives every combination of useful types and tiers;
+ * `stats` is reused between calls, so copy it to keep it.
  */
-export function buildFlameDistribution(settings) {
-  validateFlameSettings(settings);
-  const pool = flameOptionPoolForLevel(settings.itemLevel);
-  const useful = pool.filter(option => option.keys.length > 0);
+export function forEachFlameOutcome(itemLevel, statKeys, keysOf, visit) {
+  const pool = flameOptionPoolForLevel(itemLevel);
+  const useful = pool.map(option => ({ option, keys: keysOf(option) })).filter(({ keys }) => keys.length > 0);
   const ignoredCount = pool.length - useful.length;
   const denominator = combinations(pool.length, FLAME_MODEL.optionsPerReset);
-  const rowsByStats = new Map();
   const selected = [];
-  const stats = { main: 0, sub: 0, attack: 0, all: 0 };
-
-  function addRow(p) {
-    const key = `${stats.main},${stats.sub},${stats.attack},${stats.all}`;
-    const row = rowsByStats.get(key);
-    if (row) row.p += p;
-    else rowsByStats.set(key, { p, stats: { ...stats } });
-  }
+  const stats = Object.fromEntries(statKeys.map(key => [key, 0]));
 
   function assignTiers(index, p) {
     if (index === selected.length) {
-      addRow(p);
+      visit(stats, p);
       return;
     }
-    const option = selected[index];
+    const { option, keys } = selected[index];
     for (const { tier, p: tierProbability } of FLAME_TIER_PROBABILITIES) {
-      const amount = flameOptionAmount(option.kind, settings.itemLevel, tier);
-      for (const key of option.keys) stats[key] += amount;
+      const amount = flameOptionAmount(option.kind, itemLevel, tier);
+      for (const key of keys) stats[key] += amount;
       assignTiers(index + 1, p * tierProbability);
-      for (const key of option.keys) stats[key] -= amount;
+      for (const key of keys) stats[key] -= amount;
     }
   }
 
@@ -72,10 +61,33 @@ export function buildFlameDistribution(settings) {
   for (let usefulSlots = 0; usefulSlots <= FLAME_MODEL.optionsPerReset; usefulSlots++) {
     selectTypes(0, usefulSlots);
   }
+}
 
+/** The base draw grouped by attained stat tuple; equal-score tuples stay distinct. */
+export function flameStatDistribution(itemLevel, statKeys, keysOf = option => option.keys) {
+  const rowsByStats = new Map();
+  forEachFlameOutcome(itemLevel, statKeys, keysOf, (stats, p) => {
+    const key = statKeys.map(name => stats[name]).join(',');
+    const row = rowsByStats.get(key);
+    if (row) row.p += p;
+    else rowsByStats.set(key, { p, stats: { ...stats } });
+  });
+  return [...rowsByStats.values()];
+}
+
+/**
+ * Canonical one-main-stat distribution for the efficiency calculator.
+ *
+ * The real game rejects the identical complete prior result. That conditional
+ * rule needs the complete original option identities, tiers and ignored stats,
+ * which are not among this calculator's inputs. We retain the unconditional
+ * base draw. In particular, equal-score results remain in the distribution.
+ */
+export function buildFlameDistribution(settings) {
+  validateFlameSettings(settings);
   // Keeping each attained stat tuple preserves valid example combinations,
   // including different combinations with identical converted scores.
-  return [...rowsByStats.values()]
+  return flameStatDistribution(settings.itemLevel, ['main', 'sub', 'attack', 'all'])
     .map(row => ({ ...row, score: scoreStats(row.stats, settings.efficiencies) }))
     .sort((a, b) => a.score - b.score);
 }
