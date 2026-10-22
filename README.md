@@ -2,7 +2,9 @@
 
 메이플스토리를 위한 계산기입니다. 일반·에디셔널 잠재능력과 추가옵션 재설정 장사 수익, 어빌리티 고급 재설정 최적 전략, 추가옵션 재설정 중단점을 계산합니다.
 
-**[사용하기 →](https://serin511.github.io/maple-tools/)**
+**[사용하기 →](https://maple-tools.celia.moe/)**
+
+문의: [serin.kim@celia.moe](mailto:serin.kim@celia.moe) · [GitHub 저장소](https://github.com/Serin511/maple-tools)
 
 ## 특징
 - 공식 확률표 기반 3줄 조합 정확 열거 (이탈 1/5·1/20, 중복 제한 옵션 재계산 규칙 반영)
@@ -103,13 +105,17 @@ npm run test:ui
 
 시스템 Chromium이 있으면 이를 사용하며, 필요하면 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`로 실행 파일을 지정할 수 있습니다. UI 테스트는 메뉴 이동·모바일 레이아웃·실제 Worker 계산·입력 오류·저장 및 프리셋을 확인합니다. PR과 main 배포 모두 엔진·브라우저 테스트를 실행하며, 통과한 빌드만 gh-pages에 배포합니다.
 
+### 사용자 도메인 설정
+
+먼저 GitHub 저장소의 **Settings → Pages → Custom domain**에 `maple-tools.celia.moe`를 지정하세요. 그런 다음 Cloudflare DNS에 `CNAME` 레코드 `maple-tools` → `serin511.github.io`를 추가하고, 프록시는 끈 **DNS only**, TTL은 **Auto**로 설정합니다. DNS 전파와 인증서 발급이 완료되면 Pages 설정에서 **Enforce HTTPS**를 켜세요. 빌드가 `CNAME` 파일을 gh-pages 배포물에 포함하며, Pages 사용자 도메인이 활성화되면 GitHub가 기존 `https://serin511.github.io/maple-tools/` 주소를 새 도메인으로 리다이렉트합니다.
+
 새 기능을 추가할 때는 [공통 UI와 개발 지침](docs/ui-development.md)의 컴포넌트·레이아웃·계산 상태·검증 규칙을 재사용하세요. 두 에디셔널 메뉴의 환산 기본값은 한 곳에서 관리합니다. 기존의 유효한 사용자 지정값은 유지되며, 공통 패널의 **효율 기본값** 버튼으로 새 기본값을 적용할 수 있습니다.
 
 ## 방문 통계 설정 (GA4)
 
 방문자 수와 페이지 조회수는 Google Analytics에서 확인합니다. 사이트에 공개 카운터를 표시하지 않으며, GA 계정·속성의 액세스 권한을 본인에게만 부여하면 통계 보고서도 본인만 볼 수 있습니다.
 
-1. 현재 배포 대상은 측정 ID **`G-LT8GETTZFL`**인 GA4 웹 데이터 스트림입니다. Google Analytics에서 해당 스트림의 사이트 URL이 `https://serin511.github.io/maple-tools/`인지 확인합니다. 측정 ID는 배포 HTML에 포함되는 공개 설정값이며 보고서 열람 권한을 주는 비밀번호가 아닙니다.
+1. 현재 배포 대상은 측정 ID **`G-LT8GETTZFL`**인 GA4 웹 데이터 스트림입니다. Google Analytics에서 해당 스트림의 사이트 URL이 `https://maple-tools.celia.moe/`인지 확인합니다. 측정 ID는 배포 HTML에 포함되는 공개 설정값이며 보고서 열람 권한을 주는 비밀번호가 아닙니다.
 2. 해당 웹 스트림의 **향상된 측정**을 끕니다. 사이트가 직접 페이지 조회를 보내므로 자동 기록을 함께 켜면 메뉴 이동이 중복 집계될 수 있습니다.
 3. 배포 워크플로에 위 ID가 기본값으로 설정되어 있어 별도 변수 등록은 필요하지 않습니다. 다른 스트림으로 변경할 때는 GitHub 저장소의 **Settings → Secrets and variables → Actions → Variables**에 `GA4_MEASUREMENT_ID` 변수를 추가하면 기본값보다 우선 적용됩니다.
 4. **Actions → Deploy to GitHub Pages → Run workflow**로 다시 배포합니다. 배포 워크플로는 엔진·브라우저 테스트를 통과한 뒤 실행하는 프로덕션 빌드에만 이 변수를 전달합니다.

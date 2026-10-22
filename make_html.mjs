@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from "fs";
+const siteUrl = `https://${readFileSync("CNAME", "utf8").trim()}`;
 const js = readFileSync("bundle.js", "utf8");
 const css = readFileSync("bundle.css", "utf8");
 const worker = JSON.stringify(readFileSync("ability-worker.js", "utf8")).replace(/</g, "\\u003c");
@@ -12,6 +13,7 @@ const html = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link rel="canonical" href="${siteUrl}/" />
 <title>메이플 계산기 · 잠재능력·어빌리티·추가옵션·에디셔널</title>
 <meta name="description" content="메이플스토리 잠재능력·추가옵션 장사 수익, 어빌리티 최적 전략, 추가옵션·에디셔널 효율 계산기로 재설정 중단점 계산 · 공식 확률표 기반" />
 <style>html,body{margin:0;padding:0;background:#12151b}#root{min-height:100vh}${css}</style>
@@ -29,4 +31,5 @@ const html = `<!DOCTYPE html>
 </html>`;
 mkdirSync("dist", { recursive: true });
 writeFileSync("dist/index.html", html);
+copyFileSync("CNAME", "dist/CNAME");
 console.log("dist/index.html:", html.length, "bytes");

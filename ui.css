@@ -42,6 +42,24 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .maple-nav a:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 4px; border-radius: 4px; }
 .maple-nav span { margin-left: 4px; color: var(--ui-purple); font-size: 9px; }
 
+.maple-site-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin-top: 18px;
+  padding: 16px max(24px, calc((100% - 1192px) / 2));
+  border-top: 1px solid var(--ui-border);
+  background: #171c24;
+  color: var(--ui-muted);
+  font-family: var(--ui-font);
+  font-size: 11px;
+}
+.maple-site-footer nav { display: flex; flex-wrap: wrap; gap: 4px 20px; }
+.maple-site-footer a { display: inline-flex; align-items: center; min-height: 40px; color: var(--ui-muted); text-decoration: none; overflow-wrap: anywhere; }
+.maple-site-footer a:hover { color: var(--ui-accent); }
+.maple-site-footer a:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 3px; border-radius: 3px; }
+
 .calculator-page {
   /* Aliases preserve feature styles while the common palette has one source. */
   --ab-bg: var(--ui-bg); --fl-bg: var(--ui-bg);
@@ -160,6 +178,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   .maple-nav { padding: 12px 16px; }
   .maple-nav > div { gap: 4px 14px; }
   .maple-nav a { min-height: 40px; }
+  .maple-site-footer { align-items: flex-start; flex-direction: column; padding: 14px 16px; }
   .calculator-page { --ui-card-padding: 20px; padding: 25px 16px 16px; }
   .calculator-header { margin-bottom: 23px; }
   .calculator-header h1 { font-size: 29px; }
@@ -173,7 +192,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   .calculator-header h1 { font-size: 26px; }
 }
 @media (pointer: coarse) {
-  .maple-nav a, .calculator-page button, .calculator-page select, .calculator-page input:not([type="checkbox"]):not([type="radio"]), .calculator-page summary,
+  .maple-nav a, .maple-site-footer a, .calculator-page button, .calculator-page select, .calculator-page input:not([type="checkbox"]):not([type="radio"]), .calculator-page summary,
   .calculator-page .calculator-trade-field :is(input, select), .calculator-page .calculator-trade-cost-row input { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
