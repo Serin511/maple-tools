@@ -62,9 +62,12 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   justify-content: space-between;
   gap: 8px 24px;
 }
-.maple-site-footer-contributors { border-top: 1px solid var(--ui-border); padding-top: 8px; }
+.maple-site-footer-contributors { justify-content: flex-start; gap: 6px; flex-wrap: wrap; font-size: 10px; }
+.maple-site-footer-contributors > span { flex-shrink: 0; color: var(--ui-muted); }
 .maple-site-footer nav { display: flex; flex-wrap: wrap; gap: 4px 20px; }
 .maple-site-footer a { display: inline-flex; align-items: center; min-height: 40px; color: var(--ui-muted); text-decoration: none; overflow-wrap: anywhere; }
+.maple-site-footer-contributors nav { gap: 2px 8px; }
+.maple-site-footer-contributors a { color: var(--ui-text); }
 .maple-site-footer a:hover { color: var(--ui-accent); }
 .maple-site-footer a:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 3px; border-radius: 3px; }
 
@@ -187,7 +190,8 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   .maple-nav > div { gap: 4px 14px; }
   .maple-nav a { min-height: 40px; }
   .maple-site-footer { padding: 10px 16px; }
-  .maple-site-footer-primary, .maple-site-footer-contributors { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .maple-site-footer-primary { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .maple-site-footer-contributors { align-items: center; flex-direction: row; gap: 6px; }
   .calculator-page { --ui-card-padding: 20px; padding: 25px 16px 16px; }
   .calculator-header { margin-bottom: 23px; }
   .calculator-header h1 { font-size: 29px; }
