@@ -44,17 +44,25 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 
 .maple-site-footer {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px 24px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   margin-top: 18px;
-  padding: 16px max(24px, calc((100% - 1192px) / 2));
+  padding: 12px max(24px, calc((100% - 1192px) / 2));
   border-top: 1px solid var(--ui-border);
   background: #171c24;
   color: var(--ui-muted);
   font-family: var(--ui-font);
   font-size: 11px;
 }
+.maple-site-footer-primary,
+.maple-site-footer-contributors {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 24px;
+}
+.maple-site-footer-contributors { border-top: 1px solid var(--ui-border); padding-top: 8px; }
 .maple-site-footer nav { display: flex; flex-wrap: wrap; gap: 4px 20px; }
 .maple-site-footer a { display: inline-flex; align-items: center; min-height: 40px; color: var(--ui-muted); text-decoration: none; overflow-wrap: anywhere; }
 .maple-site-footer a:hover { color: var(--ui-accent); }
@@ -178,7 +186,8 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   .maple-nav { padding: 12px 16px; }
   .maple-nav > div { gap: 4px 14px; }
   .maple-nav a { min-height: 40px; }
-  .maple-site-footer { align-items: flex-start; flex-direction: column; padding: 14px 16px; }
+  .maple-site-footer { padding: 10px 16px; }
+  .maple-site-footer-primary, .maple-site-footer-contributors { align-items: flex-start; flex-direction: column; gap: 2px; }
   .calculator-page { --ui-card-padding: 20px; padding: 25px 16px 16px; }
   .calculator-header { margin-bottom: 23px; }
   .calculator-header h1 { font-size: 29px; }

@@ -39,11 +39,21 @@ export default function Shell() {
     </nav>
     {calculators.map(({ id, Page }) => (visited[id] || page === id) && <div key={id} hidden={page !== id}><Page /></div>)}
     <footer className="maple-site-footer">
-      <span>메이플 계산기</span>
-      <nav aria-label="외부 링크">
-        <a href="https://github.com/Serin511/maple-tools" target="_blank" rel="noopener noreferrer">GitHub · Serin511/maple-tools</a>
-        <a href="mailto:serin.kim@celia.moe">Contact · serin.kim@celia.moe</a>
-      </nav>
+      <div className="maple-site-footer-primary">
+        <span>메이플 계산기</span>
+        <nav aria-label="외부 링크">
+          <a href="https://github.com/Serin511/maple-tools" target="_blank" rel="noopener noreferrer">GitHub · Serin511/maple-tools</a>
+          <a href="mailto:serin.kim@celia.moe">Contact · serin.kim@celia.moe</a>
+        </nav>
+      </div>
+      <div className="maple-site-footer-contributors">
+        <span>Contributors</span>
+        <nav aria-label="기여자 캐릭터">
+          <a href="https://maplescouter.com/ko/info?name=%EC%84%B8%EB%A6%B0%EA%B2%B0" target="_blank" rel="noopener noreferrer">크로아@세린결</a>
+          <a href="https://maplescouter.com/ko/info?name=%EC%BA%AC%EB%A5%98%EB%82%98" target="_blank" rel="noopener noreferrer">크로아@캬류나</a>
+          <a href="https://maplescouter.com/ko/info?name=%EC%9D%B4%EB%AA%A8%EC%8A%A4%ED%95%9C%EB%B3%84%EB%B2%95" target="_blank" rel="noopener noreferrer">크로아@이모스한별법</a>
+        </nav>
+      </div>
     </footer>
   </>;
 }
