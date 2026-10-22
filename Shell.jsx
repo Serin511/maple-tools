@@ -42,7 +42,7 @@ export default function Shell() {
       <span>메이플 계산기</span>
       <nav aria-label="외부 링크">
         <a href="https://github.com/Serin511/maple-tools" target="_blank" rel="noopener noreferrer">GitHub · Serin511/maple-tools</a>
-        <a href="mailto:serin.kim@celia.moe">serin.kim@celia.moe</a>
+        <a href="mailto:serin.kim@celia.moe">Contact · serin.kim@celia.moe</a>
       </nav>
     </footer>
   </>;
