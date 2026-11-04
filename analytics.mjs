@@ -1,3 +1,6 @@
+import { PAGE_BY_ID } from './calculator-pages.mjs';
+import { getBasePath } from './routing.mjs';
+
 const measurementId = process.env.GA4_MEASUREMENT_ID;
 let initialized = false;
 let previousLocation;
@@ -19,10 +22,15 @@ function initialReferrer() {
   }
 }
 
+function canonicalPageLocation(page) {
+  const basePath = getBasePath(window.location.pathname, Object.keys(PAGE_BY_ID));
+  return `${window.location.origin}${basePath}${page}/`;
+}
+
 // Called by Shell after its title changes, using only a known calculator ID.
 export function trackPageView(page) {
-  if (!measurementId || isLocalPage()) return;
-  const pageLocation = `${window.location.origin}${window.location.pathname}#/${page}`;
+  if (!measurementId || isLocalPage() || !PAGE_BY_ID[page]) return;
+  const pageLocation = canonicalPageLocation(page);
   if (pageLocation === previousLocation) return;
 
   const parameters = {

@@ -6,36 +6,120 @@ import AdditionalPage from './AdditionalPage.jsx';
 import AdditionalTradePage from './AdditionalTradePage.jsx';
 import FlameTradePage from './FlameTradePage.jsx';
 import { trackPageView } from './analytics.mjs';
+import { CALCULATOR_PAGES, PAGE_BY_ID, SITE_TITLE } from './calculator-pages.mjs';
+import { getBasePath, pageFromPath, pagePath } from './routing.mjs';
 import './ui.css';
 
-// Add future calculators here to share navigation, titles and page state retention.
-const calculators = [
-  { id: 'potential', label: '잠재능력 장사', title: '잠재능력 장사', Page: App },
-  { id: 'additional-trade', label: '에디셔널 잠재 장사', title: '에디셔널 잠재능력 장사', Page: AdditionalTradePage },
-  { id: 'flame-trade', label: '추가옵션 장사', title: '추가옵션 장사', Page: FlameTradePage },
-  { id: 'ability', label: '어빌리티 전략', title: '어빌리티 최적 전략', Page: AbilityPage },
-  { id: 'flame', label: '추가옵션 효율 계산기', title: '추가옵션 효율 계산기', Page: FlamePage },
-  { id: 'additional', label: '에디셔널 전략', title: '에디셔널 전략', Page: AdditionalPage },
-];
-const pageFromHash = () => calculators.find(({ id }) => location.hash === `#/${id}`)?.id || 'potential';
+const pageComponents = {
+  potential: App,
+  'additional-trade': AdditionalTradePage,
+  'flame-trade': FlameTradePage,
+  ability: AbilityPage,
+  flame: FlamePage,
+  additional: AdditionalPage,
+};
+const calculators = CALCULATOR_PAGES.map(page => ({ ...page, Page: pageComponents[page.id] }));
+const pageIds = CALCULATOR_PAGES.map(({ id }) => id);
+const hashPage = () => window.location.hash.startsWith('#/')
+  ? PAGE_BY_ID[window.location.hash.slice(2).split(/[/?&]/, 1)[0]]?.id
+  : undefined;
+const routePage = () => pageFromPath(window.location.pathname, pageIds);
+const pageFromLocation = () => hashPage() || routePage() || 'potential';
+
+function cleanRoute(id, search = window.location.search) {
+  return pagePath(window.location, id, pageIds, search);
+}
+
+function canonicalizeHashRoute(id) {
+  if (window.location.protocol === 'file:') return;
+  window.history.replaceState(null, '', cleanRoute(id));
+}
+
+function setMeta(selector, attributes, content) {
+  let element = document.head.querySelector(selector);
+  if (!element) {
+    element = document.createElement('meta');
+    for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
+    document.head.appendChild(element);
+  }
+  element.setAttribute('content', content);
+}
+
+function updatePageMetadata(page) {
+  const canonicalUrl = window.location.protocol === 'file:'
+    ? ''
+    : `${window.location.origin}${cleanRoute(page.id, '')}`;
+  const previewTitle = `${page.title} | ${SITE_TITLE}`;
+  const description = page.description;
+  document.title = previewTitle;
+  setMeta('meta[name="description"]', { name: 'description' }, description);
+  setMeta('meta[property="og:title"]', { property: 'og:title' }, page.title);
+  setMeta('meta[property="og:description"]', { property: 'og:description' }, description);
+  setMeta('meta[name="twitter:title"]', { name: 'twitter:title' }, page.title);
+  setMeta('meta[name="twitter:description"]', { name: 'twitter:description' }, description);
+  if (canonicalUrl) {
+    let canonical = document.head.querySelector('link[rel="canonical"]');
+    if (!canonical) {
+      canonical = document.createElement('link');
+      canonical.rel = 'canonical';
+      document.head.appendChild(canonical);
+    }
+    canonical.href = canonicalUrl;
+    const imageUrl = `${window.location.origin}${getBasePath(window.location.pathname, pageIds)}og/${page.id}.png`;
+    setMeta('meta[property="og:url"]', { property: 'og:url' }, canonicalUrl);
+    setMeta('meta[property="og:image"]', { property: 'og:image' }, imageUrl);
+    setMeta('meta[property="og:image:alt"]', { property: 'og:image:alt' }, page.title);
+    setMeta('meta[name="twitter:image"]', { name: 'twitter:image' }, imageUrl);
+    setMeta('meta[name="twitter:image:alt"]', { name: 'twitter:image:alt' }, page.title);
+  }
+}
 
 export default function Shell() {
-  const [page, setPage] = useState(pageFromHash);
+  const [page, setPage] = useState(() => {
+    const selected = pageFromLocation();
+    if (hashPage()) canonicalizeHashRoute(selected);
+    return selected;
+  });
   const [visited, setVisited] = useState(() => ({ [page]: true }));
   useEffect(() => setVisited(previous => previous[page] ? previous : { ...previous, [page]: true }), [page]);
   useEffect(() => {
-    const onHash = () => setPage(pageFromHash());
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
+    const onLocation = () => {
+      const selected = pageFromLocation();
+      if (hashPage()) canonicalizeHashRoute(selected);
+      setPage(selected);
+    };
+    window.addEventListener('popstate', onLocation);
+    window.addEventListener('hashchange', onLocation);
+    return () => {
+      window.removeEventListener('popstate', onLocation);
+      window.removeEventListener('hashchange', onLocation);
+    };
   }, []);
   useEffect(() => {
-    document.title = `${calculators.find(({ id }) => id === page).title} | 메이플 계산기`;
+    const metadata = PAGE_BY_ID[page];
+    updatePageMetadata(metadata);
     trackPageView(page);
   }, [page]);
+  const navigate = event => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey
+      || event.shiftKey || event.altKey) return;
+    const anchor = event.target.closest?.('a[href]');
+    if (!anchor || anchor.target && anchor.target !== '_self' || anchor.hasAttribute('download')) return;
+    const destination = new URL(anchor.href, window.location.href);
+    if (destination.origin !== window.location.origin || window.location.protocol === 'file:') return;
+    const match = calculators.find(({ id }) => destination.pathname === cleanRoute(id, '').split('?')[0]);
+    if (!match) return;
+    event.preventDefault();
+    const nextPath = `${destination.pathname}${window.location.search}`;
+    if (`${window.location.pathname}${window.location.search}` !== nextPath || window.location.hash) {
+      window.history.pushState(null, '', nextPath);
+    }
+    setPage(match.id);
+  };
   return <>
-    <nav aria-label="계산기 페이지" className="maple-nav">
-      <a href="#/potential" className="maple-brand">🍁 메이플 계산기</a>
-      <div>{calculators.map(({ id, label }) => <a key={id} href={`#/${id}`} aria-current={page === id ? 'page' : undefined}>{label}</a>)}</div>
+    <nav aria-label="계산기 페이지" className="maple-nav" onClick={navigate}>
+      <a href={window.location.protocol === 'file:' ? '#/potential' : cleanRoute('potential')} className="maple-brand">🍁 메이플 계산기</a>
+      <div>{calculators.map(({ id, label }) => <a key={id} href={window.location.protocol === 'file:' ? `#/${id}` : cleanRoute(id)} aria-current={page === id ? 'page' : undefined}>{label}</a>)}</div>
     </nav>
     {calculators.map(({ id, Page }) => (visited[id] || page === id) && <div key={id} hidden={page !== id}><Page /></div>)}
     <footer className="maple-site-footer">

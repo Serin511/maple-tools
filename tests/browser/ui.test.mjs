@@ -4,12 +4,15 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:http';
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { readFile, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { extname, join, resolve, sep } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { solveEngine, campaignStats } from '../../potential-engine.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
+const dist = join(root, 'dist');
 const routes = [
   { path: 'potential', heading: /잠재능력.*장사/, title: '잠재능력 장사 | 메이플 계산기' },
   { path: 'additional-trade', heading: /에디셔널.*잠재능력 장사/, title: '에디셔널 잠재능력 장사 | 메이플 계산기' },
@@ -33,14 +36,35 @@ before(async () => {
   try {
     // Validate the real production artifact, including the embedded worker bundles.
     await promisify(execFile)(process.execPath, ['build.mjs'], { cwd: root });
-    const html = await readFile(new URL('../../dist/index.html', import.meta.url));
-    server = createServer((request, response) => {
-      if (request.url?.split('?')[0] === '/favicon.ico') {
-        response.writeHead(204).end();
-      } else if (request.url?.split('?')[0] === '/') {
-        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html);
-      } else {
-        response.writeHead(404).end();
+    server = createServer(async (request, response) => {
+      try {
+        const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+        if (pathname === '/favicon.ico') {
+          response.writeHead(204).end();
+          return;
+        }
+        let file = resolve(dist, `.${pathname}`);
+        if (file !== dist && !file.startsWith(`${dist}${sep}`)) {
+          response.writeHead(400).end('Bad path');
+          return;
+        }
+        if (pathname !== '/' && !pathname.endsWith('/')) {
+          const directoryIndex = join(file, 'index.html');
+          try {
+            await stat(directoryIndex);
+            response.writeHead(308, { Location: `${pathname}/${new URL(request.url, 'http://localhost').search}` }).end();
+            return;
+          } catch { /* Serve a file or return a real 404 below. */ }
+        }
+        if (pathname.endsWith('/')) file = join(file, 'index.html');
+        const body = await readFile(file);
+        const mime = extname(file) === '.png' ? 'image/png'
+          : extname(file) === '.css' ? 'text/css; charset=utf-8'
+            : extname(file) === '.js' || extname(file) === '.mjs' ? 'text/javascript; charset=utf-8'
+              : 'text/html; charset=utf-8';
+        response.writeHead(200, { 'Content-Type': mime }).end(body);
+      } catch (error) {
+        response.writeHead(error.code === 'ENOENT' || error.code === 'ENOTDIR' ? 404 : 400).end();
       }
     });
     await new Promise((resolve, reject) => {
@@ -78,7 +102,7 @@ async function withPage(run, { viewport = { width: 1440, height: 1000 }, init, d
 }
 
 async function open(page, path) {
-  await page.goto(`${origin}/#/${path}`);
+  await page.goto(`${origin}/${path}/`);
   const route = routes.find(candidate => candidate.path === path);
   await page.getByRole('heading', { level: 1, name: route.heading }).waitFor();
 }
@@ -94,6 +118,12 @@ async function assertNoOverflow(page, label) {
     viewport: document.documentElement.clientWidth,
   }));
   assert.ok(size.content <= size.viewport + 1, `${label}: page is ${size.content}px wide at a ${size.viewport}px viewport.`);
+}
+
+function metaContent(html, attribute, value) {
+  const marker = new RegExp(`\\b${attribute}=["']${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`, 'i');
+  const tag = html.match(/<meta\b[^>]*>/gi)?.find(candidate => marker.test(candidate));
+  return tag?.match(/\bcontent=["']([^"']*)["']/i)?.[1];
 }
 
 const primeRoutes = [
@@ -331,7 +361,7 @@ test('all calculator routes expose their title, current navigation and one main 
     for (const route of routes) {
       const navigation = page.getByRole('navigation', { name: '계산기 페이지' });
       // Use the menu link, as the potential route also has a brand link.
-      const link = navigation.locator(`a[href="#/${route.path}"]`).last();
+      const link = navigation.locator(`a[href="/${route.path}/"]`).last();
       await link.click();
       await page.getByRole('heading', { level: 1, name: route.heading }).waitFor();
       await page.waitForFunction(title => document.title === title, route.title);
@@ -350,6 +380,149 @@ test('all calculator routes expose their title, current navigation and one main 
     await page.goBack();
     await page.getByRole('heading', { level: 1, name: /추가옵션.*효율 계산기/ }).waitFor();
   });
+});
+
+test('built route HTML and Open Graph previews are real static files', async () => {
+  const titles = new Set();
+  const descriptions = new Set();
+  const previewHashes = new Set();
+  for (const route of routes) {
+    const response = await fetch(`${origin}/${route.path}/`);
+    assert.equal(response.status, 200, `${route.path} must have a directly servable document.`);
+    const html = await response.text();
+    assert.match(html, new RegExp(`<title>${route.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</title>`));
+    const canonical = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)/i)?.[1]
+      ?? html.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i)?.[1];
+    const description = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)/i)?.[1]
+      ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i)?.[1];
+    const image = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)/i)?.[1]
+      ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)?.[1];
+    assert.ok(canonical, `${route.path} must include a canonical link.`);
+    assert.equal(new URL(canonical, origin).pathname, `/${route.path}/`);
+    assert.ok(description?.trim(), `${route.path} must have a page-specific description.`);
+    const previewTitle = route.title.replace(/ \| 메이플 계산기$/, '');
+    assert.equal(metaContent(html, 'property', 'og:title'), previewTitle);
+    assert.equal(metaContent(html, 'property', 'og:description'), description);
+    assert.equal(metaContent(html, 'property', 'og:url'), canonical);
+    assert.equal(metaContent(html, 'property', 'og:image:alt'), `${previewTitle} 미리보기`);
+    assert.ok(image, `${route.path} must declare an Open Graph image.`);
+    assert.equal(new URL(image, origin).pathname, `/og/${route.path}.png`);
+    assert.equal(metaContent(html, 'name', 'twitter:card'), 'summary_large_image');
+    assert.equal(metaContent(html, 'name', 'twitter:title'), previewTitle);
+    assert.equal(metaContent(html, 'name', 'twitter:description'), description);
+    assert.equal(metaContent(html, 'name', 'twitter:image'), image);
+    assert.equal(metaContent(html, 'name', 'twitter:image:alt'), `${previewTitle} 미리보기`);
+    titles.add(route.title);
+    descriptions.add(description);
+    const png = await fetch(`${origin}/og/${route.path}.png`);
+    assert.equal(png.status, 200, `${route.path} preview must be publicly resolvable.`);
+    assert.match(png.headers.get('content-type') ?? '', /image\/png/i);
+    const bytes = Buffer.from(await png.arrayBuffer());
+    assert.deepEqual([...bytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+    assert.equal(bytes.toString('ascii', 12, 16), 'IHDR');
+    assert.equal(bytes.readUInt32BE(16), 1200);
+    assert.equal(bytes.readUInt32BE(20), 630);
+    previewHashes.add(createHash('sha256').update(bytes).digest('hex'));
+  }
+  assert.equal(titles.size, routes.length, 'Each static route must have its own document title.');
+  assert.equal(descriptions.size, routes.length, 'Each static route must have its own description.');
+  assert.equal(previewHashes.size, routes.length, 'Each calculator menu must have a distinct preview image.');
+  const home = await fetch(`${origin}/`);
+  assert.equal(home.status, 200);
+  const homeHtml = await home.text();
+  assert.match(homeHtml, /<title>[^<]+<\/title>/);
+  assert.equal(metaContent(homeHtml, 'property', 'og:title'), '메이플 계산기');
+  assert.equal(metaContent(homeHtml, 'property', 'og:url'), 'https://maple-tools.celia.moe/');
+  assert.equal(metaContent(homeHtml, 'property', 'og:image:alt'), '메이플 계산기 미리보기');
+  assert.equal(metaContent(homeHtml, 'name', 'twitter:card'), 'summary_large_image');
+  assert.ok(/property=["']og:image["'][^>]+content=["'][^"']*\/og\/home\.png/i.test(homeHtml)
+    || /content=["'][^"']*\/og\/home\.png["'][^>]+property=["']og:image["']/i.test(homeHtml));
+  const homePng = await fetch(`${origin}/og/home.png`);
+  assert.equal(homePng.status, 200);
+  assert.match(homePng.headers.get('content-type') ?? '', /image\/png/i);
+  const homeBytes = Buffer.from(await homePng.arrayBuffer());
+  assert.deepEqual([...homeBytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.equal(homeBytes.toString('ascii', 12, 16), 'IHDR');
+  assert.equal(homeBytes.readUInt32BE(16), 1200);
+  assert.equal(homeBytes.readUInt32BE(20), 630);
+  const missing = await fetch(`${origin}/not-a-calculator/`);
+  assert.equal(missing.status, 404, 'Unknown routes must not receive the home page fallback.');
+  const traversal = await fetch(`${origin}/%2e%2e%2fpackage.json`);
+  assert.notEqual(traversal.status, 200, 'Static serving must stay inside dist/.');
+});
+
+test('clean routes, legacy hashes, query strings and browser history work together', async () => {
+  await withPage(async page => {
+    await page.goto(`${origin}/potential?from=clean`);
+    assert.equal(new URL(page.url()).pathname, '/potential/');
+    assert.equal(new URL(page.url()).search, '?from=clean');
+    await page.getByRole('heading', { level: 1, name: routes[0].heading }).waitFor();
+    await page.reload();
+    await page.getByRole('heading', { level: 1, name: routes[0].heading }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/potential/');
+    const price = page.getByLabel('유니크 STR 12% 판매가 (억 메소)', { exact: true });
+    await price.fill('12.5');
+    await page.getByRole('navigation').locator('a[href^="/ability/"]').click();
+    await page.getByRole('heading', { level: 1, name: routes[3].heading }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/ability/');
+    assert.equal(new URL(page.url()).search, '?from=clean');
+    await page.goBack();
+    await page.getByRole('heading', { level: 1, name: routes[0].heading }).waitFor();
+    assert.equal(await price.inputValue(), '12.5', 'History navigation must retain the mounted calculator inputs.');
+    await page.goForward();
+    await page.getByRole('heading', { level: 1, name: routes[3].heading }).waitFor();
+
+    await page.goto(`${origin}/?campaign=spring#/flame`);
+    await page.getByRole('heading', { level: 1, name: routes[4].heading }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/flame/');
+    assert.equal(new URL(page.url()).search, '?campaign=spring');
+    await page.evaluate(() => { location.hash = '#/additional'; });
+    await page.getByRole('heading', { level: 1, name: routes[5].heading }).waitFor();
+    assert.equal(new URL(page.url()).pathname, '/additional/');
+    assert.equal(new URL(page.url()).search, '?campaign=spring', 'Hash canonicalization must preserve the query string.');
+    await page.goto(`${origin}/flame/index.html?campaign=direct`);
+    await page.getByRole('heading', { level: 1, name: routes[4].heading }).waitFor();
+    assert.equal(await page.title(), routes[4].title);
+    assert.equal(await page.getByRole('navigation').locator('a[href^="/ability/"]').count(), 1);
+    assert.equal(new URL(page.url()).search, '?campaign=direct');
+
+    const nativeLink = page.getByRole('navigation').locator('a[href^="/ability/"]');
+    const prevented = await nativeLink.evaluate(anchor => {
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true, button: 0 });
+      anchor.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(prevented, false, 'Modified menu clicks must retain native browser behavior.');
+  });
+});
+
+test('every legacy hash route resolves to the matching clean page', async () => {
+  await withPage(async page => {
+    for (const route of routes) {
+      await page.goto(`${origin}/#/${route.path}`);
+      await page.getByRole('heading', { level: 1, name: route.heading }).waitFor();
+      assert.equal(await page.title(), route.title);
+      assert.equal(new URL(page.url()).pathname, `/${route.path}/`);
+      assert.equal(new URL(page.url()).hash, '');
+      const current = page.getByRole('navigation').locator('[aria-current="page"]');
+      assert.equal(await current.count(), 1);
+      assert.equal(await current.getAttribute('href'), `/${route.path}/`);
+    }
+  }, { init: idleWorkers });
+});
+
+test('file-based root app continues to use legacy hash navigation', async () => {
+  await withPage(async page => {
+    const fileRoot = pathToFileURL(join(dist, 'index.html')).href;
+    await page.goto(`${fileRoot}#/flame`);
+    await page.getByRole('heading', { level: 1, name: routes[4].heading }).waitFor();
+    assert.equal(await page.title(), routes[4].title);
+    const link = page.getByRole('navigation').locator('a[href="#/ability"]');
+    assert.equal(await link.count(), 1);
+    await link.click();
+    await page.getByRole('heading', { level: 1, name: routes[3].heading }).waitFor();
+    assert.equal(new URL(page.url()).hash, '#/ability');
+  }, { init: idleWorkers });
 });
 
 test('all calculator routes fit a 375px phone, including populated results', { timeout: 180_000 }, async () => {
@@ -932,9 +1105,9 @@ test('potential prices calculate a result and persist through navigation and rel
     await price.fill('10');
     await page.getByText('라운드당 기대 순익 (장기)', { exact: true }).waitFor({ timeout: 60_000 });
     await page.waitForFunction(() => JSON.parse(localStorage.getItem('mpc:auto:v1'))?.statPrices['u:STR_12'] === '10');
-    await page.getByRole('navigation').locator('a[href="#/flame"]').click();
+    await page.getByRole('navigation').locator('a[href="/flame/"]').click();
     await page.getByRole('heading', { level: 1, name: /추가옵션.*효율 계산기/ }).waitFor();
-    await page.getByRole('navigation').locator('a[href="#/potential"]').last().click();
+    await page.getByRole('navigation').locator('a[href="/potential/"]').last().click();
     assert.equal(await price.inputValue(), '10');
     await page.reload();
     await page.getByRole('heading', { level: 1, name: /잠재능력.*장사/ }).waitFor();
@@ -1067,7 +1240,7 @@ test('potential switches and navigation are operable by keyboard', async () => {
     await detail.press('Space');
     assert.equal(await detail.getAttribute('aria-expanded'), 'false');
     await panel.waitFor({ state: 'detached' });
-    const link = page.getByRole('navigation').locator('a[href="#/flame"]');
+    const link = page.getByRole('navigation').locator('a[href="/flame/"]');
     await link.focus();
     await page.keyboard.press('Enter');
     await page.getByRole('heading', { level: 1, name: /추가옵션.*효율 계산기/ }).waitFor();
@@ -1093,7 +1266,7 @@ test('malformed potential settings and presets recover without a blank page', as
     await withPage(async page => {
       await open(page, 'potential');
       assert.ok(await page.getByRole('spinbutton').count() > 0);
-      await page.getByRole('navigation').locator('a[href="#/flame"]').click();
+      await page.getByRole('navigation').locator('a[href="/flame/"]').click();
       await page.getByRole('heading', { level: 1, name: /추가옵션.*효율 계산기/ }).waitFor();
     }, {
       data: settings,

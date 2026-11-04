@@ -4,7 +4,11 @@
 
 ## 페이지 구조
 
-`Shell.jsx`의 `calculators` 목록에 `id`, 메뉴 `label`, 문서 `title`, 페이지 컴포넌트를 한 번 등록한다. 경로는 `#/id`이며 메뉴 선택 상태·브라우저 제목·방문 페이지 보존은 Shell이 처리한다. 각 페이지의 루트는 `main.calculator-page`다. 현재 보이는 페이지에 주 제목 `h1`과 main 영역이 하나씩 있어야 한다.
+`calculator-pages.mjs`의 `CALCULATOR_PAGES`에 페이지별 `id`, 메뉴 `label`, 문서 `title`, 제목·설명 메타데이터를 등록하고, `Shell.jsx`의 컴포넌트 맵에 해당 `id`와 페이지 컴포넌트를 연결한다. 정식 경로는 `/{id}/`이며 메뉴 선택 상태·브라우저 제목·방문 페이지 보존은 Shell이 처리한다. 브라우저 뒤로·앞으로 이동 시 방문한 페이지의 입력과 결과도 유지한다. 기존 `#/id` 링크도 열리고 정식 경로로 바뀌며, HTTP에서는 쿼리 문자열을 유지한다. `file://`에서는 해시 경로를 사용한다. 각 페이지의 루트는 `main.calculator-page`다. 현재 보이는 페이지에 주 제목 `h1`과 main 영역이 하나씩 있어야 한다.
+
+빌드는 각 계산기 경로에 GitHub Pages용 정적 HTML을 생성해 직접 진입과 메뉴별 공유 미리보기를 지원한다. 링크를 공유할 때는 `https://maple-tools.celia.moe/{id}/`를 사용한다. 기존 해시 링크도 앱에서는 동작하지만 URL fragment는 공유 플랫폼에 전송되지 않으므로 홈페이지 미리보기가 사용될 수 있다. 플랫폼의 미리보기 캐시는 갱신에 시간이 걸릴 수 있다.
+
+각 경로의 Open Graph·Twitter 미리보기 제목과 설명은 `calculator-pages.mjs`의 메타데이터에서 관리하고, 이미지는 `public/og/{id}.png`에 둔다. 홈페이지 이미지는 `public/og/home.png`다. 이미지를 생성하거나 갱신할 때는 Chromium과 Playwright, 한글 글꼴이 설치된 환경에서 `npm run generate:previews`를 실행한다. 기본 글꼴은 macOS의 Apple SD Gothic Neo이며, 다른 환경에서는 시스템 한글 글꼴을 사용한다. 일반 `npm run build`는 이 이미지를 복사하며 브라우저를 실행하지 않는다.
 
 ```jsx
 import { CalculatorHeader, CalculatorCard, CalculateButton, CalculatorFooter } from './ui.jsx';
