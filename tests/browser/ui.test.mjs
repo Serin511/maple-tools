@@ -1295,3 +1295,281 @@ test('potential presets restore an intentionally empty special price list', asyn
     assert.equal(await remove.count(), 0);
   });
 });
+
+const flameNormalProfile = (overrides = {}) => ({
+  itemLevel: 200,
+  current: { main: 100, sub: 0, attack: 0, all: 5 },
+  efficiencies: { main: 1, sub: 0.1, attack: 3, all: 1.1 },
+  mesoPerPercent: 100_000_000,
+  ...overrides,
+});
+const flameXenonProfile = (overrides = {}) => ({
+  itemLevel: 200,
+  current: { STR: 36, DEX: 72, LUK: 36, attack: 5, all: 6 },
+  efficiencies: { STR: 0.5, DEX: 0.5, LUK: 0.5, attack: 2.5, all: 1 },
+  mesoPerPercent: 100_000_000,
+  ...overrides,
+});
+const flameV2 = (mode = 'normal', profiles = {}) => ({
+  mode,
+  profiles: {
+    normal: flameNormalProfile(),
+    xenon: flameXenonProfile(),
+    ...profiles,
+  },
+});
+const trackingWorkers = () => {
+  window.calculationWorkers = [];
+  window.Worker = class {
+    constructor() { this.messages = []; this.terminated = false; window.calculationWorkers.push(this); }
+    postMessage(message) { this.messages.push(message); }
+    terminate() { this.terminated = true; }
+  };
+};
+
+test('flame mode controls invalidate the old calculation and require an explicit Xenon recalculation', async () => {
+  await withPage(async page => {
+    await open(page, 'flame');
+    const modes = page.getByRole('group', { name: '계산 모드', exact: true });
+    const normal = modes.getByRole('button', { name: '일반', exact: true });
+    const xenon = modes.getByRole('button', { name: '제논', exact: true });
+    assert.equal(await modes.getByRole('button').count(), 2, 'The flame calculator has only normal and Xenon modes.');
+    assert.equal(await normal.getAttribute('aria-pressed'), 'true');
+    assert.equal(await xenon.getAttribute('aria-pressed'), 'false');
+    assert.equal(await page.getByLabel('아이템의 레벨 제한', { exact: true }).count(), 1);
+
+    await xenon.click();
+    assert.equal(await normal.getAttribute('aria-pressed'), 'false');
+    assert.equal(await xenon.getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.evaluate(() => window.calculationWorkers[0].terminated), true,
+      'Switching modes must terminate the active normal calculation.');
+    assert.equal(await page.evaluate(() => window.calculationWorkers.length), 1,
+      'Switching modes must not start a replacement calculation automatically.');
+
+    const calculate = page.getByRole('button', { name: /멈출 추가옵션 계산/ });
+    assert.equal(await calculate.isVisible(), true);
+    await calculate.click();
+    await page.waitForFunction(() => window.calculationWorkers.length === 2);
+    assert.equal(await page.evaluate(() => window.calculationWorkers[1].messages[0].settings.mode), 'xenon');
+  }, { init: trackingWorkers });
+});
+
+test('Xenon flame uses all five reference inputs and keeps the result terminology consistent on mobile', { timeout: 120_000 }, async () => {
+  await withPage(async page => {
+    await open(page, 'flame');
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    const modes = page.getByRole('group', { name: '계산 모드', exact: true });
+    await modes.getByRole('button', { name: '제논', exact: true }).click();
+    const inputs = {
+      STR: ['현재 추가옵션 STR', 'STR 10의 올스탯 환산 효율 (%)', '36', '0.5'],
+      DEX: ['현재 추가옵션 DEX', 'DEX 10의 올스탯 환산 효율 (%)', '72', '0.5'],
+      LUK: ['현재 추가옵션 LUK', 'LUK 10의 올스탯 환산 효율 (%)', '36', '0.5'],
+      attack: ['현재 추가옵션 공격력', '공격력 10의 올스탯 환산 효율 (%)', '5', '2.5'],
+      all: ['현재 추가옵션 올스탯', '올스탯 1%의 올스탯 환산 효율 (%)', '6', '1'],
+    };
+    for (const [currentLabel, efficiencyLabel, currentValue, efficiencyValue] of Object.values(inputs)) {
+      assert.equal(await page.getByLabel(currentLabel, { exact: true }).inputValue(), currentValue);
+      assert.equal(await page.getByLabel(efficiencyLabel, { exact: true }).inputValue(), efficiencyValue);
+    }
+    const allStat = page.getByLabel('현재 추가옵션 올스탯', { exact: true });
+    assert.equal(await allStat.evaluate(input => input.readOnly), false,
+      'The current all-stat option amount remains editable.');
+    assert.equal(await page.getByLabel(inputs.all[1], { exact: true }).evaluate(input => input.readOnly), true,
+      'The all-stat conversion unit is fixed at one all-stat percent.');
+    assert.equal(await page.getByLabel('환산 올스탯 1%당 지불할 최대 금액 (억 메소)', { exact: true }).count(), 1);
+    assert.match(await page.locator('.flame-current-score').innerText(), /289급/);
+    assert.equal(await page.locator('.flame-recommendation').count(), 0,
+      'Changing mode must clear the previous normal result.');
+    await assertNoOverflow(page, 'Xenon flame settings at 375px');
+
+    await page.getByLabel(inputs.DEX[1], { exact: true }).fill('0.6');
+    await page.getByRole('button', { name: /멈출 추가옵션 계산/ }).click();
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    const result = page.getByRole('region', { name: '추가옵션 종료 기준 계산 결과' });
+    assert.match(await result.innerText(), /환산 올스탯\s*%/,
+      'Unequal STR/DEX/LUK efficiencies must use the all-stat-equivalent label instead of grade.');
+    assert.doesNotMatch(await result.innerText(), /\d+(?:\.\d+)?급/);
+    await assertNoOverflow(page, 'Xenon flame result at 375px');
+  }, {
+    viewport: { width: 375, height: 812 },
+    init: data => {
+      window.localStorage.setItem('maple:flame:settings:v2', JSON.stringify(data));
+    },
+    data: flameV2('normal'),
+  });
+});
+
+test('Xenon flame auto-calculates when restored as the active mode using the embedded production worker', { timeout: 120_000 }, async () => {
+  await withPage(async page => {
+    await open(page, 'flame');
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    assert.equal(await page.getByRole('group', { name: '계산 모드' }).getByRole('button', { name: '제논' }).getAttribute('aria-pressed'), 'true');
+    const results = page.getByRole('region', { name: '추가옵션 종료 기준 계산 결과' });
+    assert.equal(await results.count(), 1);
+    assert.match(await results.innerText(), /제논 환산 급수/);
+    assert.match(await results.innerText(), /이런 추가옵션이면 멈추세요/);
+    assert.equal(await results.locator('table thead th').count(), 6,
+      'The production worker result examples must contain the five Xenon option columns and the converted score.');
+    assert.match(await results.locator('table thead').innerText(), /STR|주스텟/);
+    assert.match(await results.locator('table thead').innerText(), /DEX|부스텟/);
+    assert.match(await results.locator('table thead').innerText(), /공격력/);
+    assert.match(await results.locator('table thead').innerText(), /올스탯/);
+  }, {
+    init: data => localStorage.setItem('maple:flame:settings:v2', JSON.stringify(data)),
+    data: flameV2('xenon'),
+  });
+});
+
+test('flame v1 settings migrate and both normal and Xenon profiles persist independently', async () => {
+  const legacy = flameNormalProfile({
+    itemLevel: 250,
+    current: { main: 123, sub: 45, attack: 12, all: 8 },
+    efficiencies: { main: 1.2, sub: 0.2, attack: 4, all: 1.3 },
+    mesoPerPercent: 250_000_000,
+  });
+  await withPage(async page => {
+    await open(page, 'flame');
+    await page.waitForFunction(key => {
+      const saved = JSON.parse(localStorage.getItem(key));
+      return saved?.mode === 'normal' && saved?.profiles?.normal?.current?.main === 123;
+    }, 'maple:flame:settings:v2');
+    assert.equal(await page.getByLabel('현재 추가옵션 주스텟', { exact: true }).inputValue(), '123');
+    assert.equal(await page.getByLabel('아이템의 레벨 제한', { exact: true }).inputValue(), '250');
+    assert.equal(await page.getByLabel('주스텟 1%당 지불할 최대 금액 (억 메소)', { exact: true }).inputValue(), '2.5');
+
+    await page.getByLabel('현재 추가옵션 주스텟', { exact: true }).fill('');
+    await page.waitForFunction(key => JSON.parse(localStorage.getItem(key))?.profiles?.normal?.current?.main === '', 'maple:flame:settings:v2');
+    assert.equal(await page.getByLabel('현재 추가옵션 주스텟', { exact: true }).inputValue(), '');
+    await page.getByLabel('아이템의 레벨 제한', { exact: true }).fill('');
+    await page.waitForFunction(key => JSON.parse(localStorage.getItem(key))?.profiles?.normal?.itemLevel === '', 'maple:flame:settings:v2');
+    await page.reload();
+    await page.getByRole('heading', { level: 1, name: routes.find(candidate => candidate.path === 'flame').heading }).waitFor();
+    assert.equal(await page.getByLabel('현재 추가옵션 주스텟', { exact: true }).inputValue(), '', 'Blank numeric drafts must survive reload.');
+    assert.equal(await page.getByLabel('아이템의 레벨 제한', { exact: true }).inputValue(), '', 'A blank level draft must survive reload.');
+  }, {
+    init: (data) => {
+      localStorage.setItem('maple:flame:settings:v1', JSON.stringify(data));
+      window.calculationWorkers = [];
+      window.Worker = class {
+        constructor() { this.messages = []; this.terminated = false; window.calculationWorkers.push(this); }
+        postMessage(message) { this.messages.push(message); }
+        terminate() { this.terminated = true; }
+      };
+    },
+    data: legacy,
+  });
+
+  await withPage(async page => {
+    await open(page, 'flame');
+    const modes = page.getByRole('group', { name: '계산 모드', exact: true });
+    await page.getByLabel('현재 추가옵션 주스텟', { exact: true }).fill('111');
+    await page.getByLabel('아이템의 레벨 제한', { exact: true }).fill('240');
+    await page.getByLabel('주스텟 1%당 지불할 최대 금액 (억 메소)', { exact: true }).fill('3.75');
+    await modes.getByRole('button', { name: '제논', exact: true }).click();
+    await page.getByLabel('현재 추가옵션 STR', { exact: true }).fill('42');
+    await page.getByLabel('DEX 10의 올스탯 환산 효율 (%)', { exact: true }).fill('0.7');
+    await page.getByLabel('아이템의 레벨 제한', { exact: true }).fill('230');
+    await page.getByLabel('환산 올스탯 1%당 지불할 최대 금액 (억 메소)', { exact: true }).fill('4.5');
+    await page.waitForFunction(key => {
+      const saved = JSON.parse(localStorage.getItem(key));
+      return saved?.mode === 'xenon' && saved.profiles?.normal?.current?.main === 111
+        && saved.profiles?.xenon?.current?.STR === 42;
+    }, 'maple:flame:settings:v2');
+    await modes.getByRole('button', { name: '일반', exact: true }).click();
+    assert.equal(await page.getByLabel('현재 추가옵션 주스텟', { exact: true }).inputValue(), '111');
+    assert.equal(await page.getByLabel('아이템의 레벨 제한', { exact: true }).inputValue(), '240');
+    assert.equal(await page.getByLabel('주스텟 1%당 지불할 최대 금액 (억 메소)', { exact: true }).inputValue(), '3.75');
+    await page.reload();
+    await page.getByRole('heading', { level: 1, name: routes.find(candidate => candidate.path === 'flame').heading }).waitFor();
+    await page.getByRole('group', { name: '계산 모드' }).getByRole('button', { name: '일반' }).waitFor();
+    await page.getByRole('group', { name: '계산 모드' }).getByRole('button', { name: '제논' }).click();
+    assert.equal(await page.getByLabel('현재 추가옵션 STR', { exact: true }).inputValue(), '42');
+    assert.equal(await page.getByLabel('DEX 10의 올스탯 환산 효율 (%)', { exact: true }).inputValue(), '0.7');
+    assert.equal(await page.getByLabel('아이템의 레벨 제한', { exact: true }).inputValue(), '230');
+    assert.equal(await page.getByLabel('환산 올스탯 1%당 지불할 최대 금액 (억 메소)', { exact: true }).inputValue(), '4.5');
+  }, { init: trackingWorkers });
+});
+
+test('flame negative inputs render safely and show validation when recalculated', async () => {
+  for (const [label, value] of [
+    ['현재 추가옵션 주스텟', '-1'],
+    ['주스텟 환산 효율 (%)', '-1'],
+  ]) {
+    await withPage(async page => {
+      await open(page, 'flame');
+      const input = label === '주스텟 환산 효율 (%)'
+        ? page.getByLabel('주스텟 10의 주스텟 환산 효율 (%)', { exact: true })
+        : page.getByLabel(label, { exact: true });
+      await input.fill(value);
+      assert.match(await page.locator('.flame-current-score').innerText(), /—/,
+        `${label}: the preview must show a dash for an invalid negative value.`);
+      assert.equal(await page.getByRole('heading', { level: 1, name: routes.find(candidate => candidate.path === 'flame').heading }).count(), 1,
+        'Invalid preview input must not unmount the page.');
+      await page.getByRole('button', { name: /멈출 추가옵션 계산/ }).click();
+      await waitForText(page.getByRole('alert'), /0 이상의 숫자/);
+    }, { init: trackingWorkers });
+  }
+});
+
+test('Xenon flame negative inputs keep the page mounted and validate on recalculation', async () => {
+  for (const [label, value] of [
+    ['현재 추가옵션 STR', '-1'],
+    ['STR 10의 올스탯 환산 효율 (%)', '-1'],
+  ]) {
+    await withPage(async page => {
+      await open(page, 'flame');
+      await page.getByRole('group', { name: '계산 모드' }).getByRole('button', { name: '제논' }).click();
+      await page.getByLabel(label, { exact: true }).fill(value);
+      assert.match(await page.locator('.flame-current-score').innerText(), /—/,
+        `${label}: the Xenon preview must show a dash for an invalid negative value.`);
+      assert.equal(await page.getByRole('heading', { level: 1, name: routes.find(candidate => candidate.path === 'flame').heading }).count(), 1,
+        'Invalid Xenon preview input must not unmount the page.');
+      await page.getByRole('button', { name: /멈출 추가옵션 계산/ }).click();
+      await waitForText(page.getByRole('alert'), /0 이상의 숫자/);
+    }, { init: trackingWorkers });
+  }
+});
+
+test('flame settings parse v2 and legacy storage independently', async () => {
+  const validV1 = flameNormalProfile({ current: { main: 137, sub: 22, attack: 8, all: 4 } });
+  await withPage(async page => {
+    await open(page, 'flame');
+    assert.equal(await page.getByLabel('현재 추가옵션 주스텟', { exact: true }).inputValue(), '137',
+      'Corrupt v2 JSON must fall back to a valid v1 record.');
+    await page.waitForFunction(key => JSON.parse(localStorage.getItem(key))?.profiles?.normal?.current?.main === 137, 'maple:flame:settings:v2');
+  }, {
+    init: data => {
+      localStorage.setItem('maple:flame:settings:v2', '{bad json');
+      localStorage.setItem('maple:flame:settings:v1', JSON.stringify(data));
+      window.calculationWorkers = [];
+      window.Worker = class {
+        constructor() { this.messages = []; this.terminated = false; window.calculationWorkers.push(this); }
+        postMessage(message) { this.messages.push(message); }
+        terminate() { this.terminated = true; }
+      };
+    },
+    data: validV1,
+  });
+
+  const validV2 = flameV2('xenon', {
+    xenon: flameXenonProfile({ current: { STR: 51, DEX: 62, LUK: 73, attack: 4, all: 3 } }),
+  });
+  await withPage(async page => {
+    await open(page, 'flame');
+    assert.equal(await page.getByRole('group', { name: '계산 모드' }).getByRole('button', { name: '제논' }).getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.getByLabel('현재 추가옵션 STR', { exact: true }).inputValue(), '51',
+      'Corrupt legacy JSON must not prevent a valid v2 profile from loading.');
+  }, {
+    init: data => {
+      localStorage.setItem('maple:flame:settings:v2', JSON.stringify(data));
+      localStorage.setItem('maple:flame:settings:v1', '{bad json');
+      window.calculationWorkers = [];
+      window.Worker = class {
+        constructor() { this.messages = []; this.terminated = false; window.calculationWorkers.push(this); }
+        postMessage(message) { this.messages.push(message); }
+        terminate() { this.terminated = true; }
+      };
+    },
+    data: validV2,
+  });
+});

@@ -10,6 +10,8 @@ export const DEFAULT_FLAME_EFFICIENCIES = Object.freeze({
   all: 1.1,
 });
 
+export const DEFAULT_XENON_FLAME_EFFICIENCIES = Object.freeze({ STR: 0.5, DEX: 0.5, LUK: 0.5, attack: 2.5, all: 1 });
+
 function finiteNumber(value, name, { nonnegative = false } = {}) {
   if (typeof value !== 'number' || !Number.isFinite(value) || (nonnegative && value < 0)) {
     throw new RangeError(`${name} must be a finite${nonnegative ? ' nonnegative' : ''} number`);
@@ -40,6 +42,27 @@ export function scoreStats(stats, efficiencies = DEFAULT_FLAME_EFFICIENCIES) {
     const efficiency = finiteNumber(efficiencies[key] ?? DEFAULT_FLAME_EFFICIENCIES[key], `efficiencies.${key}`, { nonnegative: true });
     score += amount * efficiency / (key === 'all' ? 1 : 10);
   }
+  if (!Number.isFinite(score)) throw new RangeError('The converted stat score is too large');
+  return score;
+}
+
+/** Xenon score is expressed in equivalent all-stat percentage points. */
+export function scoreFlameStats(stats, efficiencies, mode = 'normal') {
+  if (mode === 'normal') return scoreStats(stats, efficiencies);
+  if (mode !== 'xenon') throw new RangeError('mode must be normal or xenon');
+  if (!stats || typeof stats !== 'object') throw new TypeError('stats must be an object');
+  if (!efficiencies || typeof efficiencies !== 'object') throw new TypeError('efficiencies must be an object');
+  let score = 0;
+  for (const key of ['STR', 'DEX', 'LUK', 'attack']) {
+    const amount = finiteNumber(stats[key] ?? 0, `stats.${key}`, { nonnegative: true });
+    const efficiency = finiteNumber(efficiencies[key] ?? DEFAULT_XENON_FLAME_EFFICIENCIES[key], `efficiencies.${key}`, { nonnegative: true });
+    const contribution = amount * efficiency / 10;
+    if (!Number.isFinite(contribution)) throw new RangeError('The converted stat score is too large');
+    score += contribution;
+  }
+  const all = finiteNumber(stats.all ?? 0, 'stats.all', { nonnegative: true });
+  if (efficiencies.all !== 1) throw new RangeError('Xenon all-stat efficiency must equal 1');
+  score += all;
   if (!Number.isFinite(score)) throw new RangeError('The converted stat score is too large');
   return score;
 }

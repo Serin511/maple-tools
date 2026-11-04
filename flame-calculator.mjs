@@ -1,11 +1,11 @@
 import { validateFlameSettings, resetCostForLevel } from './flame-data.mjs';
 import { buildFlameDistribution } from './flame-distribution.mjs';
-import { scoreStats, solveStopping } from './flame-engine.mjs';
+import { scoreFlameStats, solveStopping } from './flame-engine.mjs';
 
 export function calculateFlameStrategy(settings) {
   validateFlameSettings(settings);
   const distribution = buildFlameDistribution(settings);
-  const currentScore = scoreStats(settings.current, settings.efficiencies);
+  const currentScore = scoreFlameStats(settings.current, settings.efficiencies, settings.mode ?? 'normal');
   const resetCost = resetCostForLevel(settings.itemLevel);
   const result = solveStopping(distribution, resetCost, settings.mesoPerPercent, currentScore);
   const examples = [];

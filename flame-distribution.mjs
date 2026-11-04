@@ -5,7 +5,7 @@ import {
   flameOptionPoolForLevel,
   validateFlameSettings,
 } from './flame-data.mjs';
-import { scoreStats } from './flame-engine.mjs';
+import { scoreFlameStats } from './flame-engine.mjs';
 
 function combinations(n, k) {
   if (k < 0 || k > n) return 0;
@@ -76,18 +76,23 @@ export function flameStatDistribution(itemLevel, statKeys, keysOf = option => op
 }
 
 /**
- * Canonical one-main-stat distribution for the efficiency calculator.
- *
- * The real game rejects the identical complete prior result. That conditional
- * rule needs the complete original option identities, tiers and ignored stats,
- * which are not among this calculator's inputs. We retain the unconditional
- * base draw. In particular, equal-score results remain in the distribution.
+ * Build the normal or Xenon efficiency-calculator distribution from the base
+ * armor option draw. The real game rejects an identical complete prior result;
+ * this unconditional model retains those draws because prior option identities
+ * and tiers are not among the calculator inputs.
  */
 export function buildFlameDistribution(settings) {
   validateFlameSettings(settings);
+  const mode = settings.mode ?? 'normal';
+  if (mode === 'xenon') {
+    const relevant = new Set(['STR', 'DEX', 'LUK', 'attack', 'all']);
+    const rows = flameStatDistribution(settings.itemLevel, ['STR', 'DEX', 'LUK', 'attack', 'all'], option => option.stats.filter(key => relevant.has(key)));
+    return rows.map(row => ({ ...row, score: scoreFlameStats(row.stats, settings.efficiencies, mode) }))
+      .sort((a, b) => a.score - b.score);
+  }
   // Keeping each attained stat tuple preserves valid example combinations,
   // including different combinations with identical converted scores.
   return flameStatDistribution(settings.itemLevel, ['main', 'sub', 'attack', 'all'])
-    .map(row => ({ ...row, score: scoreStats(row.stats, settings.efficiencies) }))
+    .map(row => ({ ...row, score: scoreFlameStats(row.stats, settings.efficiencies, mode) }))
     .sort((a, b) => a.score - b.score);
 }

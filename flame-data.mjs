@@ -1,4 +1,4 @@
-import { DEFAULT_FLAME_EFFICIENCIES } from './flame-engine.mjs';
+import { DEFAULT_FLAME_EFFICIENCIES, DEFAULT_XENON_FLAME_EFFICIENCIES } from './flame-engine.mjs';
 
 // Korean MapleStory, as of the March 19, 2026 meso-reset update.
 // The level affects option amounts; the meso-reset price is a fixed 3 million.
@@ -32,6 +32,31 @@ export const DEFAULT_FLAME_SETTINGS = Object.freeze({
   efficiencies: DEFAULT_FLAME_EFFICIENCIES,
   mesoPerPercent: 100_000_000,
 });
+
+export const DEFAULT_XENON_FLAME_SETTINGS = Object.freeze({
+  mode: 'xenon',
+  itemLevel: 200,
+  current: Object.freeze({ STR: 36, DEX: 72, LUK: 36, attack: 5, all: 6 }),
+  efficiencies: DEFAULT_XENON_FLAME_EFFICIENCIES,
+  mesoPerPercent: 100_000_000,
+});
+
+export function flameStatFields(mode = 'normal') {
+  if (mode === 'normal') return [
+    { key: 'main', label: '주스텟', unit: '', scale: 10 },
+    { key: 'sub', label: '부스텟', unit: '', scale: 10 },
+    { key: 'attack', label: '공격력 / 마력', unit: '', scale: 10 },
+    { key: 'all', label: '올스텟', unit: '%', scale: 1 },
+  ];
+  if (mode === 'xenon') return [
+    { key: 'STR', label: 'STR', unit: '', scale: 10 },
+    { key: 'DEX', label: 'DEX', unit: '', scale: 10 },
+    { key: 'LUK', label: 'LUK', unit: '', scale: 10 },
+    { key: 'attack', label: '공격력', unit: '', scale: 10 },
+    { key: 'all', label: '올스탯', unit: '%', scale: 1 },
+  ];
+  throw new Error('추가옵션 모드를 확인해 주세요.');
+}
 
 export const FLAME_TIER_PROBABILITIES = Object.freeze([
   Object.freeze({ tier: 4, p: 0.29 }),
@@ -87,10 +112,14 @@ export function flameOptionAmount(kind, level, tier) {
 
 export function validateFlameSettings(settings) {
   if (!settings || typeof settings !== 'object') throw new Error('추가옵션 설정을 확인해 주세요.');
+  const mode = settings.mode ?? 'normal';
+  if (mode !== 'normal' && mode !== 'xenon') throw new Error('추가옵션 모드를 확인해 주세요.');
   if (resetCostForLevel(settings.itemLevel) === null) {
     throw new Error('아이템 레벨 제한은 1~300 사이의 정수로 입력해 주세요.');
   }
-  const labels = { main: '주스탯', sub: '부스탯', attack: '공격력/마력', all: '올스탯%' };
+  const labels = mode === 'xenon'
+    ? { STR: 'STR', DEX: 'DEX', LUK: 'LUK', attack: '공격력', all: '올스탯' }
+    : { main: '주스탯', sub: '부스탯', attack: '공격력/마력', all: '올스탯%' };
   for (const key of Object.keys(labels)) {
     const current = settings.current?.[key];
     if (!Number.isFinite(current) || current < 0) {
@@ -101,7 +130,11 @@ export function validateFlameSettings(settings) {
       throw new Error(`${labels[key]} 효율은 0 이상의 숫자로 입력해 주세요.`);
     }
   }
+  if (mode === 'xenon' && settings.efficiencies.all !== 1) {
+    throw new Error('제논 올스탯 효율은 1로 고정됩니다.');
+  }
   if (!Number.isFinite(settings.mesoPerPercent) || settings.mesoPerPercent < 0) {
-    throw new Error('주스탯 1%당 지불할 최대 금액은 0 이상의 숫자로 입력해 주세요.');
+    const unit = mode === 'xenon' ? '환산 올스탯 1%' : '주스탯 1%';
+    throw new Error(`${unit}당 지불할 최대 금액은 0 이상의 숫자로 입력해 주세요.`);
   }
 }
