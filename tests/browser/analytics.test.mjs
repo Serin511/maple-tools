@@ -11,6 +11,7 @@ const origin = 'https://maple-analytics.test';
 const routes = [
   ['potential', '잠재능력 장사'],
   ['additional-trade', '에디셔널 잠재능력 장사'],
+  ['flame-trade', '추가옵션 장사'],
   ['ability', '어빌리티 최적 전략'],
   ['flame', '추가옵션 효율 계산기'],
   ['additional', '에디셔널 전략'],
@@ -92,8 +93,8 @@ async function assertViews(page, expected) {
   assert.deepEqual(views.map(args => args[1]), expected.map(() => 'page_view'));
   assert.deepEqual(views.map(args => args[2]), expected.map(([id, title], index) => ({
     page_title: `${title} | 메이플 계산기`,
-    page_location: `${origin}/maple-tools/#/${id}`,
-    page_referrer: index ? `${origin}/maple-tools/#/${expected[index - 1][0]}` : 'https://source.example/search',
+    page_location: `${origin}/maple-tools/${id}/`,
+    page_referrer: index ? `${origin}/maple-tools/${expected[index - 1][0]}/` : 'https://source.example/search',
     send_to: measurementId,
   })));
   assert.deepEqual(entries.filter(args => args[0] === 'config'), [['config', measurementId, { send_page_view: false }]]);
@@ -111,20 +112,20 @@ test('GA4 records initial, menu and back/forward views once with canonical URLs 
     const expected = [routes[0]];
     await assertViews(page, expected);
     for (const route of routes) {
-      await page.getByRole('navigation').locator(`a[href="#/${route[0]}"]`).last().click();
+      await page.getByRole('navigation').locator(`a[href^="/maple-tools/${route[0]}/"]`).last().click();
       await page.waitForFunction(title => document.title === title, `${route[1]} | 메이플 계산기`);
       if (route !== routes[0]) expected.push(route);
       await assertViews(page, expected);
     }
     await page.goBack();
-    expected.push(routes[3]);
+    expected.push(routes[4]);
     await assertViews(page, expected);
     await page.goForward();
-    expected.push(routes[4]);
+    expected.push(routes[5]);
     await assertViews(page, expected);
     assert.equal(await page.locator('script[src*="googletagmanager.com"]').count(), 1);
     assert.deepEqual(requests, [`https://www.googletagmanager.com/gtag/js?id=${measurementId}`]);
-  }, { url: `${origin}/maple-tools/?private=value#/unknown` });
+  }, { url: `${origin}/maple-tools/?private=value#/potential` });
 });
 
 test('missing configuration and local development never load or queue GA4', async () => {
@@ -135,7 +136,7 @@ test('missing configuration and local development never load or queue GA4', asyn
   ];
   for (const options of cases) {
     await withApplication(async (page, requests) => {
-      await page.getByRole('navigation').locator('a[href="#/flame"]').click();
+      await page.getByRole('navigation').locator('a[href^="/maple-tools/flame/"]').click();
       await page.waitForFunction(() => document.title === '추가옵션 효율 계산기 | 메이플 계산기');
       assert.deepEqual(await queue(page), []);
       assert.equal(await page.evaluate(() => typeof window.gtag), 'undefined');
@@ -147,9 +148,9 @@ test('missing configuration and local development never load or queue GA4', asyn
 
 test('blocked Google script leaves deep links and calculator navigation functional', async () => {
   await withApplication(async (page, requests) => {
-    await assertViews(page, [routes[2]]);
-    await page.getByRole('navigation').locator('a[href="#/flame"]').click();
-    await assertViews(page, [routes[2], routes[3]]);
+    await assertViews(page, [routes[3]]);
+    await page.getByRole('navigation').locator('a[href^="/maple-tools/flame/"]').click();
+    await assertViews(page, [routes[3], routes[4]]);
     assert.equal(await page.getByRole('main').count(), 1);
     assert.deepEqual(requests, [`https://www.googletagmanager.com/gtag/js?id=${measurementId}`]);
   }, { url: `${origin}/maple-tools/#/ability`, blocked: true });
