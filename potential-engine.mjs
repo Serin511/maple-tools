@@ -47,6 +47,8 @@ export const VALUES = {
   250: { stat: { epic: 7, unique: 10, legend: 13 }, all: { epic: 4, unique: 7, legend: 10 } },
 };
 export const STATS = ["STR", "DEX", "INT", "LUK"];
+// 모자 동반 스탯: 단일 주스탯 + 올스탯(ALL = 올스탯% 줄만의 합계, 제논용)
+export const HAT_STATS = [...STATS, "ALL"];
 
 function validatePool(part, tier, level) {
   if (!Object.hasOwn(POOL_TOTALS, part)) throw new RangeError("지원하지 않는 잠재능력 부위입니다.");
@@ -75,7 +77,7 @@ function validateTargets(targets) {
     else if (t.kind === "hat" || t.kind === "glove") {
       nonnegative(t.kind === "hat" ? t.cd : t.crit, "목표 수치");
       nonnegative(t.statMin, "동반 스탯 수치");
-      if (t.stat && !STATS.includes(t.stat)) throw new RangeError("지원하지 않는 동반 스탯입니다.");
+      if (t.stat && !(t.kind === "hat" ? HAT_STATS : STATS).includes(t.stat)) throw new RangeError("지원하지 않는 동반 스탯입니다.");
     } else if (t.kind !== "dm" || !["drop2", "meso2", "dropmeso", "dm3"].includes(t.combo)) {
       throw new RangeError("지원하지 않는 판매 목표입니다.");
     }
@@ -217,8 +219,8 @@ export function comboSums(a1, a2, a3) {
 }
 
 export function targetSatisfied(t, sums) {
-  // 모자/장갑 동반 스탯: 지정된 단일 스탯만 유효 (직업군별 아이템 분리)
-  const statVal = t.stat ? sums.s[t.stat] : sums.maxStat;
+  // 모자/장갑 동반 스탯: 지정된 단일 스탯만 유효 (직업군별 아이템 분리), ALL은 올스탯% 줄만 합산
+  const statVal = t.stat === "ALL" ? sums.allSum : t.stat ? sums.s[t.stat] : sums.maxStat;
   switch (t.kind) {
     case "stat": return sums.s[t.stat] >= t.min;
     case "allsum": return sums.allSum >= t.min;

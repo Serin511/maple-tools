@@ -92,6 +92,9 @@ test('special rows preserve deliberate empty lists and sanitize broken rows', ()
   });
   assert.deepEqual(result.hatRows, [{ cd: 2, statMin: 0, stat: 'STR', price: '' }, { cd: 6, statMin: 13.5, stat: 'INT', price: '2.25' }]);
   assert.deepEqual(result.gloveRows, [{ crit: 8, statMin: 0, stat: 'STR', price: '' }, { crit: 24, statMin: 12, stat: 'LUK', price: '' }]);
+  const allStat = normalizePotentialSettings({ hatRows: [{ cd: 3, statMin: 12, stat: 'ALL', price: '4' }], gloveRows: [{ crit: 8, statMin: 12, stat: 'ALL', price: '' }] });
+  assert.deepEqual(allStat.hatRows, [{ cd: 3, statMin: 12, stat: 'ALL', price: '4' }]);
+  assert.equal(allStat.gloveRows[0].stat, 'STR');
 });
 
 test('legacy prices migrate to both grades while valid level thresholds and blanks remain', () => {

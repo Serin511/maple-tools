@@ -1,4 +1,4 @@
-import { COST_DEFAULT, PART_LABELS, PITY, STATS, primeAtomList } from './potential-engine.mjs';
+import { COST_DEFAULT, HAT_STATS, PART_LABELS, PITY, STATS, primeAtomList } from './potential-engine.mjs';
 
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const record = value => isRecord(value) ? value : {};
@@ -49,7 +49,7 @@ function rows(value, kind) {
     // A saved threshold can remain useful after switching item level even when
     // it is absent from the new level's quick choices.
     statMin: Number(scalar(own(row, 'statMin'), 0, { blank: false })),
-    stat: choice(own(row, 'stat'), STATS, 'STR'),
+    stat: choice(own(row, 'stat'), kind === 'cd' ? HAT_STATS : STATS, 'STR'),
     price: scalar(own(row, 'price'), ''),
   }));
 }
