@@ -1573,3 +1573,28 @@ test('flame settings parse v2 and legacy storage independently', async () => {
     data: validV2,
   });
 });
+
+test('potential hat combinations accept an all-stat companion and keep it after reload', async () => {
+  await withPage(async page => {
+    await open(page, 'potential');
+    const main = page.locator('main:visible');
+    await main.getByLabel('착용 부위', { exact: true }).selectOption('hat');
+    const stat = main.getByLabel('모자 1번 조합의 주스탯', { exact: true });
+    assert.deepEqual(await stat.locator('option').allInnerTexts(), ['STR', 'DEX', 'INT', 'LUK', '올스탯']);
+    await stat.selectOption('ALL');
+    const minimum = main.getByLabel('모자 1번 조합의 최소 스탯 (%)', { exact: true });
+    await minimum.selectOption('15');
+    await main.getByLabel('모자 1번 조합의 판매가 (억 메소)', { exact: true }).fill('30');
+    await waitForText(main, /쿨감 2초↑ \+ 올스탯 15%↑/);
+    await page.waitForFunction(() => {
+      const row = JSON.parse(localStorage.getItem('mpc:auto:v1') || '{}').hatRows?.[0];
+      return row?.stat === 'ALL' && row.statMin === 15 && row.price === '30';
+    });
+    await page.reload();
+    await main.getByLabel('모자 1번 조합의 주스탯', { exact: true }).waitFor();
+    assert.equal(await stat.inputValue(), 'ALL');
+    assert.equal(await minimum.inputValue(), '15');
+    await main.getByLabel('착용 부위', { exact: true }).selectOption('glove');
+    assert.equal(await main.getByLabel('장갑 1번 조합의 주스탯', { exact: true }).locator('option').filter({ hasText: '올스탯' }).count(), 0);
+  });
+});

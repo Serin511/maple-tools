@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { COST_DEFAULT, PART_LABELS, STATS, primeAtomList, atomLabel } from "./potential-engine.mjs";
+import { COST_DEFAULT, HAT_STATS, PART_LABELS, STATS, primeAtomList, atomLabel } from "./potential-engine.mjs";
 import { normalizePotentialSettings, normalizePotentialPresets, migratePotentialPrices as migratePrices } from "./potential-settings.mjs";
 import { preparePotentialConfig, potentialDisplayStats } from "./potential-calculator.mjs";
 import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton, PresetControls, TradeEquipmentSettings, TradeResetCostSettings, ToggleField, PrimeCubeSettings } from "./ui.jsx";
@@ -155,6 +155,9 @@ export default function App() {
   const thresholds = useMemo(() => (level === 250 ? [14, 15, 17, 18, 20, 21, 23, 24, 26, 27, 30, 33, 36, 39] : [12, 15, 18, 21, 24, 27, 30, 33, 36]), [level]);
   const allThresholds = useMemo(() => (level === 250 ? [18, 21, 24, 27, 30] : [18, 21, 24, 27]), [level]);
   const statMinOpts = level === 250 ? [0, 7, 10, 13, 14, 17, 20, 23, 26] : [0, 6, 9, 12, 18, 21];
+  // 모자 올스탯: 쿨감 1줄 + 올스탯 1~2줄 (유니크·레전드리 수치 조합)
+  const allStatMinOpts = level === 250 ? [0, 7, 10, 14, 17, 20] : [0, 6, 9, 12, 15, 18];
+  const statName = (s) => (s === "ALL" ? "올스탯" : s);
 
   const [priceGrade, setPriceGrade] = useState("u"); // 판매가 입력 탭: u(유니크) | l(레전드리)
   const copyPricesToOther = () => {
@@ -186,7 +189,7 @@ export default function App() {
       if (part === "hat") hatRows.forEach((r, i) => {
         const p = num(r.price);
         if (p) list.push({ id: `hat_${i}`, kind: "hat", cd: r.cd, statMin: r.statMin, stat: r.statMin ? (r.stat || "STR") : null, price: p,
-          base: `쿨감 ${r.cd}초↑${r.statMin ? ` + ${r.stat || "STR"} ${r.statMin}%↑` : ""}`, range: "" });
+          base: `쿨감 ${r.cd}초↑${r.statMin ? ` + ${statName(r.stat || "STR")} ${r.statMin}%↑` : ""}`, range: "" });
       });
       if (part === "glove") gloveRows.forEach((r, i) => {
         const p = num(r.price);
@@ -431,7 +434,7 @@ export default function App() {
                       onChange={(e) => (part === "hat" ? setHatRows(hatRows.map((x, k) => k === i ? { ...x, statMin: +e.target.value } : x))
                         : setGloveRows(gloveRows.map((x, k) => k === i ? { ...x, statMin: +e.target.value } : x)))}
                       style={{ ...inputStyle, width: 130 }}>
-                      {[...new Set([...statMinOpts, r.statMin])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{m === 0 ? "스탯 무관" : `+ 스탯 ${m}%↑`}</option>)}
+                      {[...new Set([...(part === "hat" && r.stat === "ALL" ? allStatMinOpts : statMinOpts), r.statMin])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{m === 0 ? "스탯 무관" : `+ 스탯 ${m}%↑`}</option>)}
                     </select>
                     </label>
                     {r.statMin > 0 && (
@@ -439,8 +442,8 @@ export default function App() {
                       <select aria-label={`${part === "hat" ? "모자" : "장갑"} ${i + 1}번 조합의 주스탯`} value={r.stat || "STR"}
                         onChange={(e) => (part === "hat" ? setHatRows(hatRows.map((x, k) => k === i ? { ...x, stat: e.target.value } : x))
                           : setGloveRows(gloveRows.map((x, k) => k === i ? { ...x, stat: e.target.value } : x)))}
-                        style={{ ...inputStyle, width: 76 }}>
-                        {STATS.map((s) => <option key={s} value={s}>{s}</option>)}
+                        style={{ ...inputStyle, width: 84 }}>
+                        {(part === "hat" ? HAT_STATS : STATS).map((s) => <option key={s} value={s}>{statName(s)}</option>)}
                       </select>
                       </label>
                     )}

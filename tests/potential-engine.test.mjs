@@ -76,6 +76,20 @@ test('all-stat always contributes to every stat while HP and all-stat goals stay
   }
 });
 
+test('hat all-stat companion counts only all-stat lines while single stats still include them', () => {
+  for (const level of [200, 250]) {
+    const atoms = buildTierAtoms('hat', 'legend', level).atoms;
+    const cd = atoms.find(a => a.key === 'CD2'), all = atoms.find(a => a.key === 'ALL'), str = atoms.find(a => a.key === 'STR');
+    const allHat = (statMin) => ({ id: 'hat', kind: 'hat', cd: 2, statMin, stat: 'ALL', price: 1 });
+    assert.ok(targetSatisfied(allHat(all.value * 2), comboSums(cd, all, all)));
+    assert.equal(targetSatisfied(allHat(all.value * 2 + 1), comboSums(cd, all, all)), false);
+    assert.equal(targetSatisfied(allHat(all.value + 1), comboSums(cd, all, str)), false);
+    assert.ok(targetSatisfied({ ...allHat(all.value + str.value), stat: 'STR' }, comboSums(cd, all, str)));
+    assert.doesNotThrow(() => buildEngine(config({ part: 'hat', level, targetsL: [allHat(all.value)] })));
+    assert.throws(() => buildEngine(config({ part: 'glove', level, targetsL: [{ id: 'g', kind: 'glove', crit: 8, statMin: 9, stat: 'ALL', price: 1 }] })), /동반 스탯/);
+  }
+});
+
 test('all-stat lines count in regular and Prime rolls even with the old disabled argument', () => {
   // For a 3% Unique goal, either the selected stat or ALL qualifies on each line.
   const highMiss = 1 - (10 + 8) / POOL_TOTALS.heart.unique;
