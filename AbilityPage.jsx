@@ -1,6 +1,6 @@
 import { CalculatorHeader, CalculatorFooter, CalculatorCard, CalculateButton } from './ui.jsx';
 import { useEffect, useRef, useState } from 'react';
-import { OPTIONS, OPTION_BY_ID, DEFAULT_SETTINGS, RESET_COSTS, costsFor, validateSettings, GRADES, qualifyingGrades } from './ability-data.mjs';
+import { OPTIONS, OPTION_BY_ID, DEFAULT_SETTINGS, RESET_COSTS, UNSPECIFIED_OPTION, costsFor, validateSettings, GRADES, qualifyingGrades } from './ability-data.mjs';
 import './ability.css';
 const SAVE_KEY='maple:ability:sets:v1';
 const copy=x=>JSON.parse(JSON.stringify(x));
@@ -74,7 +74,7 @@ export default function AbilityPage(){
     worker.current.postMessage({id:++detailRequest.current,type:'detail',rank,stateId,variants:chosen});
   }
   useEffect(()=>{if(result&&!stale){setVariants(result.initialVariants);explore(result.starts[0].id,undefined,result.rank);}},[result,stale]);
-  function changeGoal(rank,index,patch){setSettings(prev=>({...prev,sets:prev.sets.map((s,r)=>r===rank?s.map((g,i)=>i===index?{...g,...patch}:g):s)}));}
+  function changeGoal(rank,index,patch){setSettings(prev=>({...prev,sets:prev.sets.map((s,r)=>r===rank?s.map((g,i)=>i===index?(patch.option===UNSPECIFIED_OPTION?patch:{...g,...patch}):g):s)}));}
   function addSet(){setSettings(prev=>{
     const next=copy(prev.sets.at(-1));
     if(prev.sets.length===1&&next.some(g=>g.option==='status')&&!next.some(g=>g.option==='attack'))next[next.findIndex(g=>g.option==='status')]={option:'attack',min:30};
@@ -84,21 +84,24 @@ export default function AbilityPage(){
   return <main className="ability-page calculator-page">
     <CalculatorHeader className="ability-header" eyebrow="ABILITY STRATEGY" scope="레전드리 · 2026.09.17 확률표"
       title={<>어빌리티 <em>최적 전략</em></>}
-      description={<>원하는 세 옵션까지, 가장 적은 기대 비용으로.<br />옵션 확보 순서와 심연의 서큘레이터 사용 시점을 함께 계산합니다.</>} />
+      description={<>목표 세트까지, 가장 적은 기대 비용으로.<br />옵션 확보 순서와 심연의 서큘레이터 사용 시점을 함께 계산합니다.</>} />
     <div className="ability-layout calculator-layout">
       <section className="ability-settings calculator-settings" aria-label="계산 설정">
         <CalculatorCard as="div" className="ability-card">
           <div className="ability-section-title"><h2>목표 옵션 세트</h2><span>{settings.sets.length} / 4</span></div>
-          <p className="ability-muted">각 세트의 세 옵션을 모두 얻으면 달성입니다.<br/>옵션의 줄 순서는 자유롭게 계산합니다.<br/>유니크 스탑은 최소 등급과 목표 수치로 지정하세요.</p>
+          <p className="ability-muted">목표 옵션을 하나 이상 지정하세요. 미지정 줄은 어떤 옵션이 나와도 됩니다.<br/>옵션의 줄 순서는 자유롭게 계산합니다.<br/>유니크 스탑은 최소 등급과 목표 수치로 지정하세요.</p>
           {settings.sets.map((set,rank)=><fieldset className="ability-set" key={rank}><legend><span className="ability-rank">{rank+1}</span> {rank===0?'최우선 목표':'타협 가능한 세트'}</legend>{rank>0&&<button className="ability-remove" type="button" aria-label={`${rank+1}순위 세트 삭제`} onClick={()=>setSettings(prev=>({...prev,sets:prev.sets.filter((_,i)=>i!==rank)}))}>삭제</button>}
-            {set.map((g,index)=>{const option=OPTION_BY_ID[g.option];return <div className="ability-goal" key={index}>
+            {set.map((g,index)=>{const unspecified=g.option===UNSPECIFIED_OPTION,option=unspecified?null:OPTION_BY_ID[g.option],unspecifiedCount=set.filter(goal=>goal.option===UNSPECIFIED_OPTION).length;return <div className={`ability-goal${unspecified?' ability-goal-unspecified':''}`} key={index}>
               <label><span className="ability-sr">{rank+1}순위 옵션 {index+1}</span><select aria-label={`${rank+1}순위 옵션 ${index+1}`} value={g.option} onChange={e=>{
+                if(e.target.value===UNSPECIFIED_OPTION){changeGoal(rank,index,{option:UNSPECIFIED_OPTION});return;}
                 const o=OPTION_BY_ID[e.target.value],min=o.lower?Math.min(...o.values[2]):Math.max(...o.values[2]);changeGoal(rank,index,{option:o.id,min,secondaryMin:0});
-              }}>{OPTIONS.map(o=><option key={o.id} value={o.id}>{o.label}{o.unit==='%'?' (%)':''}</option>)}</select></label>
+              }}><option value={UNSPECIFIED_OPTION} disabled={!unspecified&&unspecifiedCount>=2}>미지정</option>{OPTIONS.map(o=><option key={o.id} value={o.id}>{o.label}{o.unit==='%'?' (%)':''}</option>)}</select></label>
+              {!unspecified&&<>
               <label className="ability-grade"><span>최소 등급</span><select aria-label={`${rank+1}순위 옵션 ${index+1} 최소 등급`} value={g.minGrade??0} onChange={e=>changeGoal(rank,index,{minGrade:Number(e.target.value)})}><option value={0}>등급 무관 · 수치로 판정</option><option value={1}>유니크 이상</option><option value={2}>레전드리</option></select></label>
               <div className="ability-cutoff"><span>{option.lower?'레벨 간격':'목표 최소치'}</span><label><input aria-label={`${rank+1}순위 옵션 ${index+1} 목표 수치`} type="number" min="0" step="any" value={g.min} onChange={e=>changeGoal(rank,index,{min:e.target.value===''?'':Number(e.target.value)})}/><span>{option.unit} {option.lower?'이하':'이상'}</span></label></div>
               <p className="ability-grade-hint">{qualifyingGrades(g).length?`수치 충족 시 ${qualifyingGrades(g).map(t=>GRADES[t]).join('·')}에서 종료 가능`:'선택한 조건을 만족하는 수치가 없습니다.'}</p>
               {option.secondary&&<div className="ability-cutoff"><span>두 번째 스탯 최소치</span><label><input aria-label={`${rank+1}순위 옵션 ${index+1} 두 번째 스탯 최소치`} type="number" min="0" value={g.secondaryMin??0} onChange={e=>changeGoal(rank,index,{secondaryMin:e.target.value===''?'':Number(e.target.value)})}/><span>이상</span></label></div>}
+              </>}
             </div>;})}
           </fieldset>)}
           {settings.sets.length<4&&<button className="ability-add" type="button" onClick={addSet}>＋ {settings.sets.length+1}순위 타협 세트 추가</button>}
@@ -114,7 +117,7 @@ export default function AbilityPage(){
         {error&&<div className="ability-error" role="alert">{error}</div>}
       </section>
       <section className="ability-results calculator-results" aria-label="전략 계산 결과" aria-busy={busy}>
-        {(!result||stale)&&<CalculatorCard as="div" className="ability-card ability-empty"><div className="ability-empty-icon" aria-hidden="true">✦</div><h2>{error?'입력값을 확인해 주세요':busy?'모든 선택지를 비교하고 있습니다':'새 목표로 전략을 계산해 주세요'}</h2><p>세트별 최소 수치와 재화 시세를 입력하면<br/>목표까지의 예상 비용과 다음 행동을 확인할 수 있습니다.</p>{busy&&<div className="ability-progress"/>}</CalculatorCard>}
+        {(!result||stale)&&<CalculatorCard as="div" className="ability-card ability-empty"><div className="ability-empty-icon" aria-hidden="true">✦</div><h2>{error?'입력값을 확인해 주세요':busy?'모든 선택지를 비교하고 있습니다':'새 목표로 전략을 계산해 주세요'}</h2><p>세트별 목표 조건과 재화 시세를 입력하면<br/>목표까지의 예상 비용과 다음 행동을 확인할 수 있습니다.</p>{busy&&<div className="ability-progress"/>}</CalculatorCard>}
         {result&&!stale&&<>
           <div className="ability-comparisons" aria-label="타협 범위 비교">{results.map(r=><button type="button" key={r.rank} className={selected===r.rank?'selected':''} aria-pressed={selected===r.rank} onClick={()=>selectRank(r.rank)}><span>{rankedLabel(r.rank)}</span><strong>{fmtMeso(r.total)}</strong><small>{r.rank===1?'메소 환산 기대 비용':`1순위만 대비 ${pct(1-r.total/results[0].total)} 절감`}</small></button>)}</div>
           <CalculatorCard as="div" className="ability-card ability-total"><div className="ability-section-title"><span className="ability-pill">{rankedLabel(selected)}</span><span>처음부터 시작 · 기대 비용</span></div><div className="ability-total-number">{fmtMeso(result.total)} <small>메소</small></div><p>명성치 구매비 + 재설정 메소 + 서큘레이터 환산 비용</p><div className="ability-strategy-comparison"><div><span>고급 재설정만 사용</span><b>{fmtMeso(result.noCircle)}</b></div><div><span>옵션을 다 모은 뒤에만 서큘레이터</span><b>{fmtMeso(result.finishOnly)}</b></div><div><span>사용 시점까지 최적화</span><b className="ability-green">{fmtMeso(result.total)}</b></div></div><p className="ability-model-note">동일 결과 재추첨을 제외한 모델의 최적값입니다. 재추첨을 반영한 기대 비용의 계산 범위는 <b>{fmtMeso(result.lowerTotal)}~{fmtMeso(result.total)}</b> 메소입니다.</p></CalculatorCard>

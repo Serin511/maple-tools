@@ -558,6 +558,46 @@ test('ability worker computes default strategy and rejects invalid market prices
   });
 });
 
+test('ability wildcard slots persist, omit value controls, and accept unrelated third options', { timeout: 120_000 }, async () => {
+  await withPage(async page => {
+    await open(page, 'ability');
+    const option1 = page.getByLabel('1순위 옵션 1', { exact: true });
+    const option2 = page.getByLabel('1순위 옵션 2', { exact: true });
+    const option3 = page.getByLabel('1순위 옵션 3', { exact: true });
+    await option1.selectOption('drop');
+    await option2.selectOption('meso');
+    await option3.selectOption('unspecified');
+    await page.getByLabel('1순위 옵션 1 목표 수치', { exact: true }).fill('8');
+    await page.getByLabel('1순위 옵션 2 목표 수치', { exact: true }).fill('8');
+    assert.equal(await page.getByLabel('1순위 옵션 3 최소 등급', { exact: true }).count(), 0);
+    assert.equal(await page.getByLabel('1순위 옵션 3 목표 수치', { exact: true }).count(), 0);
+    await page.waitForFunction(() => {
+      const saved = JSON.parse(localStorage.getItem('maple:ability:sets:v1'));
+      return saved?.sets?.[0]?.map(goal => goal.option).join(',') === 'drop,meso,unspecified';
+    });
+
+    await page.reload();
+    await page.getByRole('heading', { level: 1, name: /어빌리티.*최적 전략/ }).waitFor();
+    assert.equal(await page.getByLabel('1순위 옵션 1', { exact: true }).inputValue(), 'drop');
+    assert.equal(await page.getByLabel('1순위 옵션 2', { exact: true }).inputValue(), 'meso');
+    assert.equal(await page.getByLabel('1순위 옵션 3', { exact: true }).inputValue(), 'unspecified');
+
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    const results = page.getByRole('region', { name: '전략 계산 결과' });
+    const selectors = [1, 2, 3].map(line => results.getByLabel(`현재 ${line}줄 상태`, { exact: true }));
+    for (const [line, target] of [[1, '아이템 드롭률'], [2, '메소 획득량']]) {
+      const selector = selectors[line - 1];
+      const value = await selector.locator('option').filter({ hasText: target }).first().getAttribute('value');
+      assert.ok(value, `Expected a selectable ${target} state in line ${line}.`);
+      await selector.selectOption(value);
+    }
+    const unrelated = await selectors[2].locator('option').filter({ hasText: '목표 미해당' }).first().getAttribute('value');
+    assert.ok(unrelated, 'Expected an unrelated option for the wildcard third line.');
+    await selectors[2].selectOption(unrelated);
+    await waitForText(results.locator('.ability-next-action'), /목표 달성 · 종료/);
+  });
+});
+
 test('flame worker returns a stopping rule, then shows an input error', { timeout: 120_000 }, async () => {
   await withPage(async page => {
     await open(page, 'flame');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OPTIONS, OPTION_BY_ID, DEFAULT_SETTINGS, VALUE_PROBABILITIES, GRADE_PROBABILITIES, passProbability, costsFor, validateSettings, goalMatchesValue, qualifyingGrades } from '../ability-data.mjs';
+import { OPTIONS, OPTION_BY_ID, UNSPECIFIED_OPTION, DEFAULT_SETTINGS, VALUE_PROBABILITIES, GRADE_PROBABILITIES, passProbability, costsFor, validateSettings, goalMatchesValue, qualifyingGrades } from '../ability-data.mjs';
 import { buildModel, solveModel, summarize, improves, describeState, autoResetGuide } from '../ability-engine.mjs';
 const close=(a,b,tol=1e-8)=>assert.ok(Math.abs(a-b)<=tol,`${a} != ${b}`);
 const cfg=structuredClone(DEFAULT_SETTINGS),model=buildModel(cfg),solution=solveModel(model);
@@ -33,6 +33,46 @@ test('invalid/empty/infinite prices and impossible, repeated, or invalid targets
   assert.throws(()=>validateSettings({...cfg,sets:[[{option:'boss',min:19},{option:'boss',min:20},{option:'passive',min:1}]]}),/중복/);
   assert.throws(()=>validateSettings({...cfg,sets:[[{option:'boss',min:21},...cfg.sets[0].slice(1)]]}));
   assert.throws(()=>validateSettings({...cfg,sets:[[{option:'boss',min:19,secondaryMin:NaN},...cfg.sets[0].slice(1)]]}));
+});
+test('unspecified slots allow one or two omitted targets in any position, but never an empty target set',()=>{
+  const unspecified={option:UNSPECIFIED_OPTION};
+  for(const slots of [
+    [{option:'drop',min:20},unspecified,unspecified],
+    [unspecified,{option:'meso',min:15},unspecified],
+    [unspecified,unspecified,{option:'drop',min:20}],
+    [{option:'drop',min:20},{option:'meso',min:15},unspecified],
+    [unspecified,{option:'drop',min:20},{option:'meso',min:15}],
+    [{option:'meso',min:15},unspecified,{option:'drop',min:20}],
+  ]) assert.doesNotThrow(()=>validateSettings({...cfg,sets:[slots]}));
+  assert.throws(()=>validateSettings({...cfg,sets:[[unspecified,unspecified,unspecified]]}),/최소 한 줄/);
+  assert.throws(()=>validateSettings({...cfg,sets:[[{option:'drop',min:20},{option:'drop',min:15},unspecified]]}),/중복/);
+});
+test('drop and meso goals finish on any two lines with any third physical option',()=>{
+  const unspecified={option:UNSPECIFIED_OPTION};
+  const m=buildModel({...cfg,sets:[[{option:'drop',min:20,minGrade:1},{option:'meso',min:15,minGrade:1},unspecified]]});
+  for(const third of ['boss','passive','STR']) {
+    for(const permutation of [
+      [['drop',2,true],['meso',2,true],[third]],
+      [['drop',2,true],[third],['meso',2,true]],
+      [[third],['drop',2,true],['meso',2,true]],
+    ]) assert.equal(findState(m,permutation).goal,true,`${third} at ${permutation.map(x=>x[0]).join(',')}`);
+  }
+  const belowThreshold=findState(m,[['drop',2,false],['meso',2,true],['boss']]);
+  assert.equal(belowThreshold.goal,false);
+  const gradeRestricted={option:'meso',min:15,minGrade:2};
+  assert.deepEqual(qualifyingGrades(gradeRestricted),[2]);
+  assert.equal(goalMatchesValue(gradeRestricted,1,15),false);
+});
+test('ranked unspecified-slot sets do not combine partial matches across ranks',()=>{
+  const unspecified={option:UNSPECIFIED_OPTION};
+  const m=buildModel({...cfg,sets:[
+    [{option:'drop',min:20}, {option:'meso',min:15}, unspecified],
+    [{option:'boss',min:19}, {option:'passive',min:1}, unspecified],
+  ]},2);
+  const mixed=findState(m,[['drop',2,true],['boss',2,true],['STR']]);
+  assert.equal(mixed.goal,false);
+  const second=findState(m,[['boss',2,true],['passive',2,true],['STR']]);
+  assert.equal(second.goalRank,1);
 });
 test('every action conserves mass and every state respects option multiplicities',()=>{
   for(const a of model.actions)close(a.outcomes.reduce((s,[,p])=>s+p,0),1,1e-10);

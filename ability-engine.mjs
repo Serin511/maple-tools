@@ -1,4 +1,4 @@
-import { OPTIONS, OPTION_BY_ID, GRADE_PROBABILITIES, VALUE_PROBABILITIES, GRADES, costsFor, validateSettings, goalMatchesValue } from './ability-data.mjs';
+import { OPTIONS, OPTION_BY_ID, GRADE_PROBABILITIES, VALUE_PROBABILITIES, GRADES, UNSPECIFIED_OPTION, costsFor, validateSettings, goalMatchesValue } from './ability-data.mjs';
 
 // The observable model retains option identity (or exchangeable non-target
 // identities), grade whenever it affects the goal, and cutoff satisfaction.
@@ -7,9 +7,13 @@ import { OPTIONS, OPTION_BY_ID, GRADE_PROBABILITIES, VALUE_PROBABILITIES, GRADES
 export function buildModel(settings, maxRank = 1) {
   validateSettings(settings);
   const sets = settings.sets.slice(0,maxRank);
-  const goals = sets.flat().map((g,i)=>({...g,bit:1<<i}));
+  // Wildcards impose no condition, while all three physical rolls still
+  // participate in draws. Keep configured slot offsets stable across ranks.
+  const goalsBySet=sets.map((set,rank)=>set.flatMap((g,line)=>
+    g.option===UNSPECIFIED_OPTION?[]:[{...g,bit:1<<(rank*3+line)}]));
+  const goals=goalsBySet.flat();
   const targetIds = new Set(goals.map(g=>g.option));
-  const setMasks = sets.map((_,i)=>7<<(i*3));
+  const setMasks=goalsBySet.map(goals=>goals.reduce((mask,goal)=>mask|goal.bit,0));
   const types=[], grouped=new Map();
   for (const option of OPTIONS) {
     const key=targetIds.has(option.id)?option.id:option.weights.join(',');

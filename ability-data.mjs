@@ -2,6 +2,7 @@
 // https://maplestory.nexon.com/Guide/OtherProbability/ability/reputevalue
 // Grade order: epic, unique, legendary. Published rounded weights are normalized.
 export const GRADES = ['에픽', '유니크', '레전드리'];
+export const UNSPECIFIED_OPTION = 'unspecified';
 export const VALUE_PROBABILITIES = [0.2, 0.2, 0.2, 0.15, 0.15, 0.1];
 export const GRADE_PROBABILITIES = [[0, 0, 1], [0.83, 0.15, 0.02], [0.83, 0.15, 0.02]];
 export const RESET_COSTS = [{ honor: 20000, meso: 2000000 }, { honor: 30000, meso: 6000000 }, { honor: 40000, meso: 15000000 }];
@@ -61,8 +62,10 @@ export function validateSettings(s) {
   if (!Array.isArray(s.sets)||s.sets.length<1||s.sets.length>4) throw new Error('1~4순위 목표 세트를 입력해 주세요.');
   s.sets.forEach((set,rank)=> {
     if(!Array.isArray(set)||set.length!==3) throw new Error(`${rank+1}순위 세트는 세 옵션이 필요합니다.`);
-    if(new Set(set.map(g=>g.option)).size!==3) throw new Error(`${rank+1}순위 세트에 같은 옵션 종류를 중복 지정할 수 없습니다.`);
-    for (const g of set) {
+    const specified=set.filter(g=>g?.option!==UNSPECIFIED_OPTION);
+    if(!specified.length) throw new Error(`${rank+1}순위 세트에는 최소 한 줄의 목표 옵션을 지정해 주세요.`);
+    if(new Set(specified.map(g=>g.option)).size!==specified.length) throw new Error(`${rank+1}순위 세트에 같은 옵션 종류를 중복 지정할 수 없습니다.`);
+    for (const g of specified) {
       const o=OPTION_BY_ID[g.option];
       if(!o||!Number.isFinite(g.min)||g.min<=0||!Number.isFinite(g.secondaryMin??0)||(g.secondaryMin??0)<0) throw new Error(`${rank+1}순위 세트의 목표 수치를 확인해 주세요.`);
       if(g.minGrade!==undefined&&![0,1,2].includes(g.minGrade)) throw new Error(`${rank+1}순위: 최소 등급을 확인해 주세요.`);
