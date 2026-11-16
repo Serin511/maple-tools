@@ -1487,13 +1487,28 @@ test('flame transfer scroll comparison toggles, judges the source item and persi
     await waitForText(page.getByRole('status'), /계산 완료/);
     assert.match(await verdict.innerText(), /전승하지 마세요/);
 
+    await page.getByLabel('전승할 추가옵션 주스텟', { exact: true }).fill('90');
+    await page.getByLabel('전승할 추가옵션 올스텟', { exact: true }).fill('3');
+    await page.getByLabel('전승할 추옵템 가격 (억 메소)', { exact: true }).fill('0');
+    await page.getByRole('button', { name: /멈출 추가옵션 계산/ }).click();
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    assert.match(await verdict.innerText(), /전승 가치 없음/,
+      'A source worse than the current flame has no transfer value, whatever the ticket costs.');
+    assert.doesNotMatch(await verdict.innerText(), /전승권 가격만으로 손해/);
+
     await page.getByLabel('추가옵션 전승권 가격 (억 메소)', { exact: true }).fill('');
     await page.getByRole('button', { name: /멈출 추가옵션 계산/ }).click();
-    await waitForText(page.getByRole('alert'), /전승권 가격/);
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    assert.match(await verdict.getByRole('alert').innerText(), /전승권 가격/);
+    assert.match(await results.innerText(), /여기서부터 예상되는 결과/,
+      'A blank transfer draft must not block the main stopping result.');
     await page.waitForFunction(key => JSON.parse(localStorage.getItem(key))?.profiles?.normal?.transfer?.ticketPrice === '', 'maple:flame:settings:v2');
     await page.reload();
     assert.equal(await page.getByRole('checkbox', { name: '전승 비교' }).isChecked(), true);
-    assert.equal(await page.getByLabel('전승할 추옵템 가격 (억 메소)', { exact: true }).inputValue(), '100');
+    assert.equal(await page.getByLabel('전승할 추옵템 가격 (억 메소)', { exact: true }).inputValue(), '0');
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    assert.match(await results.innerText(), /여기서부터 예상되는 결과/,
+      'Restoring a blank transfer draft still auto-calculates the stopping result.');
   }, {
     viewport: { width: 375, height: 812 },
     init: data => {

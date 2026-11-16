@@ -106,11 +106,18 @@ function TransferSettings({ stats, transfer, sourceScore, formatScore, onChange 
  * Result card with the transfer verdict, its value breakdown and the reroll reference.
  *
  * @param {object} props - Card props.
- * @param {object} props.transfer - Result of `evaluateFlameTransfer`.
+ * @param {object} props.transfer - Result of `evaluateFlameTransfer`, or `{ error }` for an invalid draft.
  * @param {(value: number|null) => string} props.formatScore - Score formatter of the active mode.
  * @param {string} props.costStat - Label of one score unit for price wording.
  */
 function TransferVerdict({ transfer, formatScore, costStat }) {
+  if (transfer.error) {
+    return <CalculatorCard as="section" className="flame-card flame-transfer-result" aria-label="추가옵션 전승권 판단">
+      <div className="flame-section-title"><span className="flame-pill">추가옵션 전승권</span></div>
+      <p className="flame-error" role="alert">{transfer.error}</p>
+      <p className="flame-small-note">전승권 입력을 채운 뒤 다시 계산하면 전승 여부를 판단합니다. 종료 기준 계산은 전승 입력과 관계없이 표시됩니다.</p>
+    </CalculatorCard>;
+  }
   const better = transfer.sourceScore > transfer.currentScore;
   const reason = !better
     ? '전승할 추가옵션이 현재 추가옵션보다 높지 않습니다. 전승하면 오히려 현재 옵션을 잃습니다.'
@@ -130,7 +137,7 @@ function TransferVerdict({ transfer, formatScore, costStat }) {
       <div><span>전승으로 얻는 가치</span><b>{signedMeso(transfer.valueGain)}</b></div>
       <div><span>전승 비용 (전승권 + 추옵템)</span><b>{meso(transfer.transferCost)}</b></div>
       <div><span>순이득</span><b className={transfer.netBenefit > 0 ? 'flame-green' : 'flame-loss'}>{signedMeso(transfer.netBenefit)}</b></div>
-      <div><span>추옵템 손익분기 가격</span><b>{transfer.breakEvenSourcePrice > 0 ? `${meso(transfer.breakEvenSourcePrice)} 미만` : '전승권 가격만으로 손해'}</b></div>
+      <div><span>추옵템 손익분기 가격</span><b>{transfer.valueGain <= 0 ? '전승 가치 없음' : transfer.breakEvenSourcePrice > 0 ? `${meso(transfer.breakEvenSourcePrice)} 미만` : '전승권 가격만으로 손해'}</b></div>
     </div>
     <div className="flame-acceptance"><span>참고: 직접 재설정으로 전승할 추가옵션 이상을 만들 때</span><b>{transfer.rerollAttemptsToMatch === 0
       ? '이미 현재 옵션이 같거나 높음'

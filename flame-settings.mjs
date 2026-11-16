@@ -2,6 +2,7 @@ import {
   DEFAULT_FLAME_SETTINGS,
   DEFAULT_XENON_FLAME_SETTINGS,
   validateFlameSettings,
+  validateFlameTransfer,
 } from './flame-data.mjs';
 
 export const FLAME_SETTINGS_KEY = 'maple:flame:settings:v2';
@@ -19,24 +20,31 @@ export function createFlameSettingsState() {
   };
 }
 
-/** Merge a saved transfer draft over defaults; malformed drafts reset to defaults. */
-function mergeTransfer(defaults, candidate) {
+const blankAsZero = value => value === '' ? 0 : value;
+
+/**
+ * Merge a saved transfer draft over defaults, keeping only the mode's stat keys.
+ * Blank fields stay as drafts; any other invalid value resets the transfer only.
+ */
+function mergeTransfer(defaults, candidate, mode) {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return clone(defaults);
   const transfer = {
-    ...clone(defaults),
-    ...candidate,
     enabled: candidate.enabled === true,
-    source: { ...clone(defaults.source), ...(candidate.source ?? {}) },
+    ticketPrice: candidate.ticketPrice ?? defaults.ticketPrice,
+    sourcePrice: candidate.sourcePrice ?? defaults.sourcePrice,
+    source: Object.fromEntries(Object.entries(defaults.source)
+      .map(([key, fallback]) => [key, candidate.source?.[key] ?? fallback])),
   };
-  const checked = clone(transfer);
-  for (const key of ['ticketPrice', 'sourcePrice']) {
-    if (checked[key] === '') checked[key] = 0;
-    if (!Number.isFinite(checked[key]) || checked[key] < 0) return clone(defaults);
+  try {
+    validateFlameTransfer({
+      ticketPrice: blankAsZero(transfer.ticketPrice),
+      sourcePrice: blankAsZero(transfer.sourcePrice),
+      source: Object.fromEntries(Object.entries(transfer.source).map(([key, value]) => [key, blankAsZero(value)])),
+    }, mode);
+    return transfer;
+  } catch {
+    return clone(defaults);
   }
-  for (const value of Object.values(checked.source)) {
-    if (value !== '' && (!Number.isFinite(value) || value < 0)) return clone(defaults);
-  }
-  return transfer;
 }
 
 function validateProfile(candidate, defaults, mode) {
@@ -48,7 +56,7 @@ function validateProfile(candidate, defaults, mode) {
     mode,
     current: { ...clone(defaults.current), ...(candidate.current ?? {}) },
     efficiencies: { ...clone(defaults.efficiencies), ...(candidate.efficiencies ?? {}) },
-    transfer: mergeTransfer(defaults.transfer, candidate.transfer),
+    transfer: mergeTransfer(defaults.transfer, candidate.transfer, mode),
   };
   // Empty strings are intentional drafts: validate against safe surrogates
   // while retaining the blank values for the UI and storage.
@@ -60,12 +68,6 @@ function validateProfile(candidate, defaults, mode) {
     }
   }
   if (checked.mesoPerPercent === '') checked.mesoPerPercent = 0;
-  for (const key of ['ticketPrice', 'sourcePrice']) {
-    if (checked.transfer[key] === '') checked.transfer[key] = 0;
-  }
-  for (const [key, value] of Object.entries(checked.transfer.source)) {
-    if (value === '') checked.transfer.source[key] = 0;
-  }
   try {
     validateFlameSettings(checked);
     return profile;
