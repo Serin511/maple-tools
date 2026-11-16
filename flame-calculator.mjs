@@ -1,6 +1,6 @@
 import { validateFlameSettings, resetCostForLevel } from './flame-data.mjs';
 import { buildFlameDistribution } from './flame-distribution.mjs';
-import { scoreFlameStats, solveStopping } from './flame-engine.mjs';
+import { evaluateFlameTransfer, scoreFlameStats, solveStopping } from './flame-engine.mjs';
 
 export function calculateFlameStrategy(settings) {
   validateFlameSettings(settings);
@@ -20,5 +20,15 @@ export function calculateFlameStrategy(settings) {
     examples.push({ stats: row.stats, score: row.score, p: row.p });
     if (examples.length === 5) break;
   }
-  return { ...result, currentScore, resetCost, examples, distributionSize: distribution.length };
+  const transfer = settings.transfer?.enabled
+    ? evaluateFlameTransfer(distribution, {
+      resetCost,
+      mesoPerPercent: settings.mesoPerPercent,
+      currentScore,
+      sourceScore: scoreFlameStats(settings.transfer.source, settings.efficiencies, settings.mode ?? 'normal'),
+      ticketPrice: settings.transfer.ticketPrice,
+      sourcePrice: settings.transfer.sourcePrice,
+    })
+    : null;
+  return { ...result, currentScore, resetCost, examples, transfer, distributionSize: distribution.length };
 }

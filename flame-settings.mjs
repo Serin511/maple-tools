@@ -19,6 +19,26 @@ export function createFlameSettingsState() {
   };
 }
 
+/** Merge a saved transfer draft over defaults; malformed drafts reset to defaults. */
+function mergeTransfer(defaults, candidate) {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return clone(defaults);
+  const transfer = {
+    ...clone(defaults),
+    ...candidate,
+    enabled: candidate.enabled === true,
+    source: { ...clone(defaults.source), ...(candidate.source ?? {}) },
+  };
+  const checked = clone(transfer);
+  for (const key of ['ticketPrice', 'sourcePrice']) {
+    if (checked[key] === '') checked[key] = 0;
+    if (!Number.isFinite(checked[key]) || checked[key] < 0) return clone(defaults);
+  }
+  for (const value of Object.values(checked.source)) {
+    if (value !== '' && (!Number.isFinite(value) || value < 0)) return clone(defaults);
+  }
+  return transfer;
+}
+
 function validateProfile(candidate, defaults, mode) {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
   if (candidate.mode !== undefined && candidate.mode !== mode) return null;
@@ -28,6 +48,7 @@ function validateProfile(candidate, defaults, mode) {
     mode,
     current: { ...clone(defaults.current), ...(candidate.current ?? {}) },
     efficiencies: { ...clone(defaults.efficiencies), ...(candidate.efficiencies ?? {}) },
+    transfer: mergeTransfer(defaults.transfer, candidate.transfer),
   };
   // Empty strings are intentional drafts: validate against safe surrogates
   // while retaining the blank values for the UI and storage.
@@ -39,6 +60,12 @@ function validateProfile(candidate, defaults, mode) {
     }
   }
   if (checked.mesoPerPercent === '') checked.mesoPerPercent = 0;
+  for (const key of ['ticketPrice', 'sourcePrice']) {
+    if (checked.transfer[key] === '') checked.transfer[key] = 0;
+  }
+  for (const [key, value] of Object.entries(checked.transfer.source)) {
+    if (value === '') checked.transfer.source[key] = 0;
+  }
   try {
     validateFlameSettings(checked);
     return profile;
