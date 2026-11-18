@@ -1460,6 +1460,64 @@ test('Xenon flame auto-calculates when restored as the active mode using the emb
   });
 });
 
+test('flame transfer scroll comparison toggles, judges the source item and persists its draft', { timeout: 120_000 }, async () => {
+  await withPage(async page => {
+    await open(page, 'flame');
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    const results = page.getByRole('region', { name: '추가옵션 종료 기준 계산 결과' });
+    assert.equal(await results.getByRole('region', { name: '추가옵션 전승권 판단' }).count(), 0,
+      'The transfer verdict stays hidden until the comparison is enabled.');
+    assert.equal(await page.getByLabel('추가옵션 전승권 가격 (억 메소)', { exact: true }).count(), 0);
+
+    await page.getByRole('checkbox', { name: '전승 비교' }).check();
+    await page.getByLabel('전승할 추가옵션 주스텟', { exact: true }).fill('200');
+    await page.getByLabel('전승할 추가옵션 올스텟', { exact: true }).fill('7');
+    assert.match(await page.locator('.flame-transfer-score').innerText(), /277급/);
+    await page.getByLabel('추가옵션 전승권 가격 (억 메소)', { exact: true }).fill('0.5');
+    await page.getByLabel('전승할 추옵템 가격 (억 메소)', { exact: true }).fill('3');
+    await page.getByRole('button', { name: /멈출 추가옵션 계산/ }).click();
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    const verdict = results.getByRole('region', { name: '추가옵션 전승권 판단' });
+    assert.match(await verdict.innerText(), /전승하세요/);
+    assert.match(await verdict.innerText(), /3\.5억 메소/);
+    await assertNoOverflow(page, 'flame transfer verdict at 375px');
+
+    await page.getByLabel('전승할 추옵템 가격 (억 메소)', { exact: true }).fill('100');
+    await page.getByRole('button', { name: /멈출 추가옵션 계산/ }).click();
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    assert.match(await verdict.innerText(), /전승하지 마세요/);
+
+    await page.getByLabel('전승할 추가옵션 주스텟', { exact: true }).fill('90');
+    await page.getByLabel('전승할 추가옵션 올스텟', { exact: true }).fill('3');
+    await page.getByLabel('전승할 추옵템 가격 (억 메소)', { exact: true }).fill('0');
+    await page.getByRole('button', { name: /멈출 추가옵션 계산/ }).click();
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    assert.match(await verdict.innerText(), /전승 가치 없음/,
+      'A source worse than the current flame has no transfer value, whatever the ticket costs.');
+    assert.doesNotMatch(await verdict.innerText(), /전승권 가격만으로 손해/);
+
+    await page.getByLabel('추가옵션 전승권 가격 (억 메소)', { exact: true }).fill('');
+    await page.getByRole('button', { name: /멈출 추가옵션 계산/ }).click();
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    assert.match(await verdict.getByRole('alert').innerText(), /전승권 가격/);
+    assert.match(await results.innerText(), /여기서부터 예상되는 결과/,
+      'A blank transfer draft must not block the main stopping result.');
+    await page.waitForFunction(key => JSON.parse(localStorage.getItem(key))?.profiles?.normal?.transfer?.ticketPrice === '', 'maple:flame:settings:v2');
+    await page.reload();
+    assert.equal(await page.getByRole('checkbox', { name: '전승 비교' }).isChecked(), true);
+    assert.equal(await page.getByLabel('전승할 추옵템 가격 (억 메소)', { exact: true }).inputValue(), '0');
+    await waitForText(page.getByRole('status'), /계산 완료/);
+    assert.match(await results.innerText(), /여기서부터 예상되는 결과/,
+      'Restoring a blank transfer draft still auto-calculates the stopping result.');
+  }, {
+    viewport: { width: 375, height: 812 },
+    init: data => {
+      if (!window.localStorage.getItem('maple:flame:settings:v2')) window.localStorage.setItem('maple:flame:settings:v2', JSON.stringify(data));
+    },
+    data: flameV2('normal'),
+  });
+});
+
 test('flame v1 settings migrate and both normal and Xenon profiles persist independently', async () => {
   const legacy = flameNormalProfile({
     itemLevel: 250,

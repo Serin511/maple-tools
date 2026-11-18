@@ -31,6 +31,12 @@ export const DEFAULT_FLAME_SETTINGS = Object.freeze({
   current: Object.freeze({ main: 100, sub: 0, attack: 0, all: 5 }),
   efficiencies: DEFAULT_FLAME_EFFICIENCIES,
   mesoPerPercent: 100_000_000,
+  transfer: Object.freeze({
+    enabled: false,
+    ticketPrice: '',
+    sourcePrice: '',
+    source: Object.freeze({ main: 0, sub: 0, attack: 0, all: 0 }),
+  }),
 });
 
 export const DEFAULT_XENON_FLAME_SETTINGS = Object.freeze({
@@ -39,6 +45,12 @@ export const DEFAULT_XENON_FLAME_SETTINGS = Object.freeze({
   current: Object.freeze({ STR: 36, DEX: 72, LUK: 36, attack: 5, all: 6 }),
   efficiencies: DEFAULT_XENON_FLAME_EFFICIENCIES,
   mesoPerPercent: 100_000_000,
+  transfer: Object.freeze({
+    enabled: false,
+    ticketPrice: '',
+    sourcePrice: '',
+    source: Object.freeze({ STR: 0, DEX: 0, LUK: 0, attack: 0, all: 0 }),
+  }),
 });
 
 export function flameStatFields(mode = 'normal') {
@@ -110,6 +122,12 @@ export function flameOptionAmount(kind, level, tier) {
   return 0;
 }
 
+function flameInputLabels(mode) {
+  return mode === 'xenon'
+    ? { STR: 'STR', DEX: 'DEX', LUK: 'LUK', attack: '공격력', all: '올스탯' }
+    : { main: '주스탯', sub: '부스탯', attack: '공격력/마력', all: '올스탯%' };
+}
+
 export function validateFlameSettings(settings) {
   if (!settings || typeof settings !== 'object') throw new Error('추가옵션 설정을 확인해 주세요.');
   const mode = settings.mode ?? 'normal';
@@ -117,9 +135,7 @@ export function validateFlameSettings(settings) {
   if (resetCostForLevel(settings.itemLevel) === null) {
     throw new Error('아이템 레벨 제한은 1~300 사이의 정수로 입력해 주세요.');
   }
-  const labels = mode === 'xenon'
-    ? { STR: 'STR', DEX: 'DEX', LUK: 'LUK', attack: '공격력', all: '올스탯' }
-    : { main: '주스탯', sub: '부스탯', attack: '공격력/마력', all: '올스탯%' };
+  const labels = flameInputLabels(mode);
   for (const key of Object.keys(labels)) {
     const current = settings.current?.[key];
     if (!Number.isFinite(current) || current < 0) {
@@ -136,5 +152,31 @@ export function validateFlameSettings(settings) {
   if (!Number.isFinite(settings.mesoPerPercent) || settings.mesoPerPercent < 0) {
     const unit = mode === 'xenon' ? '환산 올스탯 1%' : '주스탯 1%';
     throw new Error(`${unit}당 지불할 최대 금액은 0 이상의 숫자로 입력해 주세요.`);
+  }
+}
+
+/**
+ * Validate the optional transfer-scroll inputs of one mode profile.
+ *
+ * Kept apart from `validateFlameSettings` so an incomplete transfer draft
+ * never blocks the main stopping calculation.
+ *
+ * @param {object} transfer - Transfer draft with prices and source stats.
+ * @param {'normal'|'xenon'} [mode='normal'] - Mode whose stat keys the source uses.
+ * @throws {Error} With a Korean message naming the first invalid field.
+ */
+export function validateFlameTransfer(transfer, mode = 'normal') {
+  if (!transfer || typeof transfer !== 'object') throw new Error('추가옵션 전승권 설정을 확인해 주세요.');
+  if (!Number.isFinite(transfer.ticketPrice) || transfer.ticketPrice < 0) {
+    throw new Error('추가옵션 전승권 가격은 0 이상의 숫자로 입력해 주세요.');
+  }
+  if (!Number.isFinite(transfer.sourcePrice) || transfer.sourcePrice < 0) {
+    throw new Error('전승할 추옵템 가격은 0 이상의 숫자로 입력해 주세요.');
+  }
+  for (const [key, label] of Object.entries(flameInputLabels(mode))) {
+    const value = transfer.source?.[key];
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`전승할 추가옵션 ${label}은 0 이상의 숫자로 입력해 주세요.`);
+    }
   }
 }

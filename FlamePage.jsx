@@ -16,6 +16,9 @@ const meso = value => {
   if (value >= 1e4) return `${number(value / 1e4)}만 메소`;
   return `${number(value, 0)} 메소`;
 };
+const signedMeso = value => Number.isFinite(value) && value < 0 ? `−${meso(-value)}` : meso(value);
+const eokInput = value => value === '' ? '' : value / 1e8;
+const fromEokInput = raw => raw === '' ? '' : Number(raw) * 1e8;
 function loadState() {
   const read = key => {
     try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
@@ -29,16 +32,16 @@ function loadState() {
   }
 }
 
-function currentScore(settings, stats) {
-  if (stats.some(({ key }) => settings.current[key] === '' || settings.efficiencies[key] === '')) return null;
-  try { return scoreFlameStats(settings.current, settings.efficiencies, settings.mode); } catch { return null; }
+function currentScore(settings, stats, values = settings.current) {
+  if (stats.some(({ key }) => values?.[key] === '' || settings.efficiencies[key] === '')) return null;
+  try { return scoreFlameStats(values, settings.efficiencies, settings.mode); } catch { return null; }
 }
 
-function StatInput({ stat, value, onChange }) {
+function StatInput({ stat, value, onChange, labelPrefix = '현재 추가옵션' }) {
   return <label className="flame-stat-input">
     <span>{stat.label}</span>
     <div className="flame-input-unit">
-      <input aria-label={`현재 추가옵션 ${stat.label}`} type="number" min="0" step="1" inputMode="decimal"
+      <input aria-label={`${labelPrefix} ${stat.label}`} type="number" min="0" step="1" inputMode="decimal"
         value={value} onChange={event => onChange(event.target.value === '' ? '' : Number(event.target.value))} />
       {stat.unit && <span>{stat.unit}</span>}
     </div>
@@ -66,6 +69,84 @@ function OptionExamples({ examples, formatScore, stats, showGrade, mode }) {
   </CalculatorCard>;
 }
 
+/**
+ * Settings card for comparing a bonus-stat transfer scroll against rerolling.
+ *
+ * @param {object} props - Card props.
+ * @param {Array<object>} props.stats - Mode-specific stat field descriptors.
+ * @param {object} props.transfer - Transfer draft of the active mode profile.
+ * @param {number|null} props.sourceScore - Converted score of the source flame.
+ * @param {(value: number|null) => string} props.formatScore - Score formatter of the active mode.
+ * @param {(patch: object) => void} props.onChange - Applies a partial transfer update.
+ */
+function TransferSettings({ stats, transfer, sourceScore, formatScore, onChange }) {
+  return <CalculatorCard as="div" className="flame-card flame-transfer-card">
+    <div className="flame-section-title"><h2>추가옵션 전승권</h2>
+      <label className="flame-toggle"><input type="checkbox" checked={transfer.enabled} onChange={event => onChange({ enabled: event.target.checked })} /><span>전승 비교</span></label>
+    </div>
+    <p className="flame-muted">같은 장비의 다른 추옵템에서 추가옵션을 옮겨올지 판단합니다. 추가옵션을 추출한 장비는 사라집니다.</p>
+    {transfer.enabled && <>
+      <div className="flame-stat-grid">{stats.map(stat => <StatInput key={stat.key} stat={stat} labelPrefix="전승할 추가옵션" value={transfer.source[stat.key]}
+        onChange={value => onChange({ source: { ...transfer.source, [stat.key]: value } })} />)}</div>
+      <div className="flame-transfer-score"><span>전승할 추가옵션 환산 합계</span><b>{formatScore(sourceScore)}</b></div>
+      <label className="flame-field-label">추가옵션 전승권 가격
+        <div className="flame-input-unit"><input aria-label="추가옵션 전승권 가격 (억 메소)" type="number" min="0" step="any" inputMode="decimal"
+          value={eokInput(transfer.ticketPrice)} onChange={event => onChange({ ticketPrice: fromEokInput(event.target.value) })} /><span>억 메소</span></div>
+      </label>
+      <label className="flame-field-label">전승할 추옵템 가격
+        <div className="flame-input-unit"><input aria-label="전승할 추옵템 가격 (억 메소)" type="number" min="0" step="any" inputMode="decimal"
+          value={eokInput(transfer.sourcePrice)} onChange={event => onChange({ sourcePrice: fromEokInput(event.target.value) })} /><span>억 메소</span></div>
+      </label>
+      <p className="flame-small-note">이미 가진 장비에서 추출한다면 그 장비를 팔 수 있는 가격을 추옵템 가격으로 입력하세요.</p>
+    </>}
+  </CalculatorCard>;
+}
+
+/**
+ * Result card with the transfer verdict, its value breakdown and the reroll reference.
+ *
+ * @param {object} props - Card props.
+ * @param {object} props.transfer - Result of `evaluateFlameTransfer`, or `{ error }` for an invalid draft.
+ * @param {(value: number|null) => string} props.formatScore - Score formatter of the active mode.
+ * @param {string} props.costStat - Label of one score unit for price wording.
+ */
+function TransferVerdict({ transfer, formatScore, costStat }) {
+  if (transfer.error) {
+    return <CalculatorCard as="section" className="flame-card flame-transfer-result" aria-label="추가옵션 전승권 판단">
+      <div className="flame-section-title"><span className="flame-pill">추가옵션 전승권</span></div>
+      <p className="flame-error" role="alert">{transfer.error}</p>
+      <p className="flame-small-note">전승권 입력을 채운 뒤 다시 계산하면 전승 여부를 판단합니다. 종료 기준 계산은 전승 입력과 관계없이 표시됩니다.</p>
+    </CalculatorCard>;
+  }
+  const better = transfer.sourceScore > transfer.currentScore;
+  const reason = !better
+    ? '전승할 추가옵션이 현재 추가옵션보다 높지 않습니다. 전승하면 오히려 현재 옵션을 잃습니다.'
+    : transfer.valueGain <= 0
+      ? transfer.threshold === null
+        ? `${costStat} 상승분에 비용을 배정하지 않았으므로, 전승으로 얻는 가치가 없습니다.`
+        : '현재 추가옵션과 전승할 추가옵션이 모두 종료 기준 미만입니다. 어느 쪽이든 종료 기준까지 재설정해야 하므로 전승으로 얻는 가치가 없습니다.'
+      : transfer.shouldTransfer
+        ? `전승으로 얻는 가치가 전승 비용보다 ${meso(transfer.netBenefit)} 큽니다.`
+        : `전승 비용이 전승으로 얻는 가치보다 ${meso(-transfer.netBenefit)} 큽니다.`;
+  return <CalculatorCard as="section" className={`flame-card flame-transfer-result ${transfer.shouldTransfer ? 'flame-keep' : 'flame-reset'}`} aria-label="추가옵션 전승권 판단">
+    <div className="flame-section-title"><span className="flame-pill">추가옵션 전승권</span><span>입력한 {costStat}당 가치 기준</span></div>
+    <div className="flame-action"><span className="flame-action-symbol" aria-hidden="true">{transfer.shouldTransfer ? '✓' : '✕'}</span><div><span>이 추옵템을</span><h2>{transfer.shouldTransfer ? '전승하세요' : '전승하지 마세요'}</h2><p>{reason}</p></div></div>
+    <div className="flame-transfer-grid">
+      <div><span>현재 추가옵션</span><b>{formatScore(transfer.currentScore)}</b></div>
+      <div><span>전승할 추가옵션</span><b>{formatScore(transfer.sourceScore)}</b></div>
+      <div><span>전승으로 얻는 가치</span><b>{signedMeso(transfer.valueGain)}</b></div>
+      <div><span>전승 비용 (전승권 + 추옵템)</span><b>{meso(transfer.transferCost)}</b></div>
+      <div><span>순이득</span><b className={transfer.netBenefit > 0 ? 'flame-green' : 'flame-loss'}>{signedMeso(transfer.netBenefit)}</b></div>
+      <div><span>추옵템 손익분기 가격</span><b>{transfer.valueGain <= 0 ? '전승 가치 없음' : transfer.breakEvenSourcePrice > 0 ? `${meso(transfer.breakEvenSourcePrice)} 미만` : '전승권 가격만으로 손해'}</b></div>
+    </div>
+    <div className="flame-acceptance"><span>참고: 직접 재설정으로 전승할 추가옵션 이상을 만들 때</span><b>{transfer.rerollAttemptsToMatch === 0
+      ? '이미 현재 옵션이 같거나 높음'
+      : transfer.sourceReachable ? `평균 ${number(transfer.rerollAttemptsToMatch)}회 · ${meso(transfer.rerollCostToMatch)}` : '재설정으로 나올 수 없는 수치'}</b></div>
+    {transfer.resetAfterTransfer && <p className="flame-small-note">전승한 추가옵션도 종료 기준 미만이므로, 전승 후에도 종료 기준까지 재설정하는 경우의 가치로 계산했습니다(전승 후 예상 재설정 비용 {meso(transfer.expectedResetCostAfterTransfer)}).</p>}
+    <p className="flame-small-note">전승 가치는 현재 옵션과 전승할 옵션 각각에서 최적으로 재설정했을 때의 기대 가치 차이입니다. 직접 재설정 비용은 참고값이며, 판정에는 입력한 {costStat}당 가치를 사용합니다. 전승은 동일한 장비끼리만 가능합니다.</p>
+  </CalculatorCard>;
+}
+
 export default function FlamePage() {
   const [state, setState] = useState(loadState);
   const { mode } = state;
@@ -80,6 +161,7 @@ export default function FlamePage() {
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const preview = currentScore(settings, stats);
+  const sourcePreview = currentScore(settings, stats, settings.transfer.source);
   const equalPositiveXenon = mode === 'xenon' && ['STR', 'DEX', 'LUK'].every(key => Number.isFinite(settings.efficiencies[key]) && settings.efficiencies[key] > 0 && settings.efficiencies[key] === settings.efficiencies.STR);
   const showGrade = mode === 'normal' ? settings.efficiencies.main > 0 : equalPositiveXenon;
   const toMainStat = value => showGrade && Number.isFinite(value)
@@ -223,6 +305,8 @@ export default function FlamePage() {
           </label>
           <p className="flame-small-note">총 예산이 아닌 스텟 상승분의 가치입니다. 높게 입력할수록 더 좋은 추가옵션까지 재설정합니다.</p>
         </CalculatorCard>
+        <TransferSettings stats={stats} transfer={settings.transfer} sourceScore={sourcePreview} formatScore={formatScore}
+          onChange={patch => change({ transfer: { ...settings.transfer, ...patch } })} />
         <CalculateButton className="flame-calculate" type="button" onClick={calculate}>{busy ? '현재 설정으로 다시 계산' : '멈출 추가옵션 계산'}<span aria-hidden="true">→</span></CalculateButton>
         <p className="flame-status calculator-status" role="status" aria-live="polite">{progress}</p>
         {error && <p className="flame-error" role="alert">{error}</p>}
@@ -251,6 +335,7 @@ export default function FlamePage() {
                 : '추가 상승분의 기대 가치가 재설정 비용을 넘지 않습니다. 입력한 스텟 가치에서는 여기서 멈추는 것이 유리합니다.'}</p></div></div>
             {result.targetScore !== null && <ScoreComparison current={result.currentScore} target={result.targetScore} formatScore={formatScore} />}
           </CalculatorCard>
+          {result.transfer && <TransferVerdict transfer={result.transfer} formatScore={formatScore} costStat={costStat} />}
           <CalculatorCard as="section" className="flame-card">
             <div className="flame-section-title"><h2>여기서부터 예상되는 결과</h2><span>평균값 · 보장 수치 아님</span></div>
             <div className="flame-estimate-grid">

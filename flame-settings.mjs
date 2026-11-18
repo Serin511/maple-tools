@@ -2,6 +2,7 @@ import {
   DEFAULT_FLAME_SETTINGS,
   DEFAULT_XENON_FLAME_SETTINGS,
   validateFlameSettings,
+  validateFlameTransfer,
 } from './flame-data.mjs';
 
 export const FLAME_SETTINGS_KEY = 'maple:flame:settings:v2';
@@ -19,6 +20,33 @@ export function createFlameSettingsState() {
   };
 }
 
+const blankAsZero = value => value === '' ? 0 : value;
+
+/**
+ * Merge a saved transfer draft over defaults, keeping only the mode's stat keys.
+ * Blank fields stay as drafts; any other invalid value resets the transfer only.
+ */
+function mergeTransfer(defaults, candidate, mode) {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return clone(defaults);
+  const transfer = {
+    enabled: candidate.enabled === true,
+    ticketPrice: candidate.ticketPrice ?? defaults.ticketPrice,
+    sourcePrice: candidate.sourcePrice ?? defaults.sourcePrice,
+    source: Object.fromEntries(Object.entries(defaults.source)
+      .map(([key, fallback]) => [key, candidate.source?.[key] ?? fallback])),
+  };
+  try {
+    validateFlameTransfer({
+      ticketPrice: blankAsZero(transfer.ticketPrice),
+      sourcePrice: blankAsZero(transfer.sourcePrice),
+      source: Object.fromEntries(Object.entries(transfer.source).map(([key, value]) => [key, blankAsZero(value)])),
+    }, mode);
+    return transfer;
+  } catch {
+    return clone(defaults);
+  }
+}
+
 function validateProfile(candidate, defaults, mode) {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
   if (candidate.mode !== undefined && candidate.mode !== mode) return null;
@@ -28,6 +56,7 @@ function validateProfile(candidate, defaults, mode) {
     mode,
     current: { ...clone(defaults.current), ...(candidate.current ?? {}) },
     efficiencies: { ...clone(defaults.efficiencies), ...(candidate.efficiencies ?? {}) },
+    transfer: mergeTransfer(defaults.transfer, candidate.transfer, mode),
   };
   // Empty strings are intentional drafts: validate against safe surrogates
   // while retaining the blank values for the UI and storage.

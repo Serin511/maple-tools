@@ -200,3 +200,64 @@ export function solveStopping(distribution, resetCost, mesoPerPercent, currentSc
     examples,
   };
 }
+
+/**
+ * Decide whether a bonus-stat transfer scroll is worth using.
+ *
+ * Under the optimal stopping rule, an item at score x is worth
+ * v * max(x, t) net of future reset costs, where t is the stopping
+ * threshold. Transferring replaces x with the source score s, so its
+ * value gain is v * (max(s, t) - max(x, t)). The transfer pays off when this
+ * gain exceeds the ticket price plus the price of the consumed source item.
+ *
+ * @param {Array<{score: number, p: number}>} distribution - One-reset score distribution.
+ * @param {object} options - Transfer inputs.
+ * @param {number} options.resetCost - Meso cost of one reset.
+ * @param {number} options.mesoPerPercent - Willingness to pay per score unit.
+ * @param {number} options.currentScore - Score of the target item's current flame.
+ * @param {number} options.sourceScore - Score of the flame to transfer.
+ * @param {number} options.ticketPrice - Meso price of the transfer scroll.
+ * @param {number} options.sourcePrice - Meso price of the source item, which is destroyed.
+ * @returns {object} The verdict, value gain, costs, break-even source price and
+ *   the reference expected reroll cost to reach the source score directly.
+ * @throws {RangeError} If any numeric input is not finite or a price is negative.
+ */
+export function evaluateFlameTransfer(distribution, { resetCost, mesoPerPercent, currentScore, sourceScore, ticketPrice, sourcePrice }) {
+  finiteNumber(sourceScore, 'sourceScore');
+  finiteNumber(ticketPrice, 'ticketPrice', { nonnegative: true });
+  finiteNumber(sourcePrice, 'sourcePrice', { nonnegative: true });
+  const stay = solveStopping(distribution, resetCost, mesoPerPercent, currentScore);
+  const moved = solveStopping(distribution, resetCost, mesoPerPercent, sourceScore);
+  const { threshold } = stay;
+  const settled = score => threshold === null ? score : Math.max(score, threshold);
+  const valueGain = mesoPerPercent === 0 ? 0 : mesoPerPercent * (settled(sourceScore) - settled(currentScore));
+  const transferCost = ticketPrice + sourcePrice;
+  const netBenefit = valueGain - transferCost;
+
+  // Equal-score stat tuples can differ by rounding, so match within a relative tolerance.
+  const { support } = normalizeDistribution(distribution);
+  const cutoff = sourceScore - 1e-9 * Math.max(1, Math.abs(sourceScore));
+  const reach = accumulator();
+  for (const outcome of support) if (outcome.score >= cutoff) reach.add(outcome.p);
+  const reachProbability = reach.value();
+  const alreadyThere = sourceScore <= currentScore;
+  const rerollAttemptsToMatch = alreadyThere ? 0 : reachProbability > 0 ? 1 / reachProbability : Infinity;
+
+  return {
+    threshold,
+    targetScore: stay.targetScore,
+    currentScore,
+    sourceScore,
+    valueGain,
+    transferCost,
+    netBenefit,
+    shouldTransfer: netBenefit > 0,
+    breakEvenSourcePrice: valueGain - ticketPrice,
+    sourceReachable: alreadyThere || reachProbability > 0,
+    rerollAttemptsToMatch,
+    rerollCostToMatch: rerollAttemptsToMatch === 0 ? 0 : resetCost * rerollAttemptsToMatch,
+    resetWithoutTransfer: stay.shouldReset,
+    resetAfterTransfer: moved.shouldReset,
+    expectedResetCostAfterTransfer: moved.expectedCost,
+  };
+}
